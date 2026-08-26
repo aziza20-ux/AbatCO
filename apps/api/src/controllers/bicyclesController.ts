@@ -1,0 +1,12 @@
+import type { Response } from 'express'
+import { z } from 'zod'
+import { audit } from '../audit.js'
+import { asyncRoute } from '../errors.js'
+import { prisma } from '../prisma.js'
+import type { AuthRequest } from '../middleware/auth.js'
+
+const bicycleInput = z.object({ frameNumber: z.string().trim().min(1).max(100), brand: z.string().trim().max(100).optional(), model: z.string().trim().max(100).optional(), color: z.string().trim().max(80).optional(), distinguishingFeatures: z.string().trim().max(1000).optional(), photos: z.array(z.string().url()).max(10).optional(), currentOwnerId: z.string().cuid().optional() })
+export async function listBicycles(request: AuthRequest, response: Response) { const query = z.object({ q: z.string().trim().max(100).optional(), page: z.coerce.number().int().min(1).default(1), limit: z.coerce.number().int().min(1).max(100).default(20) }).parse(request.query); const where = query.q ? { OR: [{ frameNumber: { contains: query.q, mode: 'insensitive' as const } }, { brand: { contains: query.q, mode: 'insensitive' as const } }, { currentOwner: { name: { contains: query.q, mode: 'insensitive' as const } } }] } : {}; const bicycles = await prisma.bicycle.findMany({ where, skip: (query.page - 1) * query.limit, take: query.limit, include: { currentOwner: { select: { id: true, name: true, nationalId: true } } }, orderBy: { updatedAt: 'desc' } }); return response.json({ data: bicycles }) }
+export async function getBicycle(request: AuthRequest, response: Response) { const bicycle = await prisma.bicycle.findUnique({ where: { id: String(request.params.id) }, include: { currentOwner: true, registrations: { orderBy: { createdAt: 'desc' } }, transactions: { orderBy: { transactionDate: 'desc' }, take: 50, select: { transactionId: true, type: true, sellerId: true, buyerId: true, transactionDate: true, flagStatus: true } } } }); if (!bicycle) return response.status(404).json({ error: { code: 'NOT_FOUND', message: 'Bicycle not found' } }); return response.json({ data: bicycle }) }
+export async function createBicycle(request: AuthRequest, response: Response) { const input = bicycleInput.parse(request.body); const bicycle = await prisma.bicycle.create({ data: input }); await audit(request.user!.id, 'BICYCLE_CREATED', 'Bicycle', bicycle.id); return response.status(201).json({ data: bicycle }) }
+export const bicycleHandlers = { listBicycles: asyncRoute(listBicycles), getBicycle: asyncRoute(getBicycle), createBicycle: asyncRoute(createBicycle) }

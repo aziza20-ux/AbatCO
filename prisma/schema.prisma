@@ -27,6 +27,13 @@ enum FlagStatus {
   NONE
   FLAGGED
   REVIEWED
+  CONFLICTED
+}
+
+enum SyncOperationStatus {
+  PENDING
+  APPLIED
+  CONFLICTED
 }
 
 model User {
@@ -35,10 +42,14 @@ model User {
   passwordHash String
   name         String
   role         Role           @default(AGENT)
+  phone        String?
+  isActive     Boolean        @default(true)
   transactions Transaction[]
   adminReviews Transaction[] @relation("AdminReviews")
   registrations Registration[]
   auditLogs    AuditLog[]
+  refreshTokens RefreshToken[]
+  syncOperations SyncOperation[]
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
 }
@@ -48,7 +59,10 @@ model Person {
   name            String
   nationalId      String         @unique
   phone           String?
+  cell            String?
   address         String?
+  sector          String?
+  village         String?
   currentBicycles Bicycle[]      @relation("CurrentOwner")
   registrations   Registration[]
   soldTransactions Transaction[] @relation("Seller")
@@ -91,8 +105,11 @@ model Transaction {
   reason            String?
   location          String?
   transactionDate   DateTime        @default(now())
+  transactionId     String          @unique
   flagStatus        FlagStatus      @default(NONE)
   flagReason        String?
+  agentNote         String?
+  serviceFee        Decimal?        @db.Decimal(12, 2)
   adminReviewedById String?
   adminReviewedBy   User?           @relation("AdminReviews", fields: [adminReviewedById], references: [id])
   adminReviewedAt   DateTime?
@@ -101,6 +118,7 @@ model Transaction {
   updatedAt         DateTime        @updatedAt
   @@index([bicycleId, transactionDate])
   @@index([recordingAgentId, transactionDate])
+  @@index([transactionId])
 }
 
 model Registration {
@@ -126,4 +144,31 @@ model AuditLog {
   metadata  Json?
   @@index([entity, entityId])
   @@index([userId, timestamp])
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  revokedAt DateTime?
+  replacedById String?
+  @@index([userId, expiresAt])
+}
+
+model SyncOperation {
+  id             String              @id @default(cuid())
+  clientOperationId String            @unique
+  userId         String
+  user           User                @relation(fields: [userId], references: [id])
+  entity         String
+  entityId       String?
+  payload        Json
+  status         SyncOperationStatus @default(PENDING)
+  conflictReason String?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  @@index([userId, status])
 }

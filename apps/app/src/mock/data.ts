@@ -44,3 +44,19 @@ export const mockAdminTransactions: AdminTransaction[] = [
   { id: 'TX-98420-BK', type: 'REGISTRATION', bicycle: 'Trek Marlin 7 Gen 2', frameNumber: 'TRK-9928', parties: 'Elena Rodriguez', agent: 'AGENT_8821', date: 'Nov 24 · 09:42', status: 'Verified' },
   { id: 'TX-98419-BK', type: 'SALE', bicycle: 'Giant Escape 3', frameNumber: 'GNT-3810', parties: 'Kwame Boateng → Peter Smith', agent: 'AGENT_4430', date: 'Nov 23 · 16:18', status: 'Pending sync' },
 ]
+
+export type PersonRecord = {
+  id: string
+  name: string
+  nationalId: string
+  phone: string
+  cell: string
+  sector: string
+  village: string
+}
+
+export const mockPeople: PersonRecord[] = [
+  { id: 'P-1001', name: 'Daniel Mensah', nationalId: 'NID-8842-19', phone: '+233 24 555 0191', cell: 'East-04', sector: 'East Sector 7', village: 'Mango Village' },
+  { id: 'P-1002', name: 'Amina Bello', nationalId: 'NID-1108-44', phone: '+233 20 555 0120', cell: 'East-02', sector: 'East Sector 3', village: 'Riverside Village' },
+  { id: 'P-1003', name: 'Kwame Boateng', nationalId: 'NID-7351-08', phone: '+233 27 555 0148', cell: 'North-01', sector: 'North Sector 2', village: 'Hilltop Village' },
+]

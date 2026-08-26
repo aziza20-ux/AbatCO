@@ -18,3 +18,10 @@ export function requireAuth(request: AuthRequest, response: Response, next: Next
     return response.status(401).json({ error: 'Invalid authentication token' })
   }
 }
+
+export function requireRole(...roles: AuthUser['role'][]) {
+  return (request: AuthRequest, response: Response, next: NextFunction) => {
+    if (!request.user || !roles.includes(request.user.role)) return response.status(403).json({ error: { code: 'FORBIDDEN', message: 'Insufficient permissions' } })
+    return next()
+  }
+}
