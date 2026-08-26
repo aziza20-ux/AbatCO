@@ -6,7 +6,7 @@ export type AuthRequest = Request & { user?: AuthUser }
 
 export function requireAuth(request: AuthRequest, response: Response, next: NextFunction) {
   const header = request.header('authorization')
-  const token = header?.startsWith('Bearer ') ? header.slice(7) : undefined
+  const token = header?.startsWith('Bearer ') ? header.slice(7) : (request.query?.token as string | undefined)
   if (!token) return response.status(401).json({ error: 'Authentication required' })
 
   try {

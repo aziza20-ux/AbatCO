@@ -1,7 +1,10 @@
-import { useState, type ReactNode } from 'react'
+import { useState, useEffect, type ReactNode } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Activity, ArrowLeft, ArrowRight, Bike, CalendarDays, Check, ChevronRight, Cloud, Database, Eye, FileText, Flag, Home, LockKeyhole, MapPin, Plus, QrCode, Search, Send, Settings, ShieldAlert, ShieldCheck, Signal, Smartphone, Trash2, TrendingUp, UserRound, Users, Wifi, X } from 'lucide-react'
-import { mockActivity, mockAdminTransactions, mockBicycles, mockPeople, mockUser, type BicycleRecord, type PersonRecord } from './mock/data'
+import { type BicycleRecord, type PersonRecord, mockUser } from './mock/data'
 import { db } from './lib/db'
+import * as api from './lib/api'
+import { startSyncWorker } from './lib/sync'
 
 type Screen = 'login' | 'home' | 'admin-home' | 'admin-transactions' | 'transaction-record' | 'flagged-queue' | 'bicycle-inventory' | 'ownership-chain' | 'registry-profile' | 'agent-management' | 'agent-onboarding' | 'agent-terminal' | 'reports-exports' | 'transaction' | 'register' | 'search' | 'details' | 'activity' | 'profile'
 type Role = 'AGENT' | 'ADMIN'
@@ -16,43 +19,57 @@ const navItems: { screen: Screen; label: string; icon: typeof Home }[] = [
 export default function App() {
   const [screen, setScreen] = useState<Screen>('login')
   const [role, setRole] = useState<Role>('AGENT')
-  const [selected, setSelected] = useState<BicycleRecord>(mockBicycles[0])
+  const [currentUser, setCurrentUser] = useState<{ id: string; name: string; role: Role } | null>(null)
+  const [selected, setSelected] = useState<BicycleRecord | null>(null)
+  const [selectedTransactionId, setSelectedTransactionId] = useState<string | null>(null)
+  const [detailsOrigin, setDetailsOrigin] = useState<Screen>('search')
+  const [transactionOrigin, setTransactionOrigin] = useState<Screen>('admin-transactions')
   const [query, setQuery] = useState('')
   const [transactionStep, setTransactionStep] = useState(0)
   const [saved, setSaved] = useState(false)
   const [warning, setWarning] = useState(false)
   const [ownerDetails, setOwnerDetails] = useState<PersonRecord | null>(null)
+  const [selectedAgent, setSelectedAgent] = useState<api.Agent | null>(null)
 
-  const openDetails = (record: BicycleRecord) => { setSelected(record); setScreen('details') }
+  useEffect(() => {
+    if (screen !== 'login') return startSyncWorker()
+  }, [screen])
+
+  const openDetails = (record: BicycleRecord, origin: Screen = 'search') => { setSelected(record); setDetailsOrigin(origin); setScreen('details') }
+  const openDetailsById = async (id: string, frameNumber: string) => {
+    const result = await api.listBicycles(frameNumber).catch(() => null)
+    const bike = result?.data.find((b) => b.id === id) ?? result?.data[0]
+    if (bike) openDetails({ id: bike.id, frameNumber: bike.frameNumber, name: `${bike.brand ?? ''} ${bike.model ?? ''}`.trim() || bike.frameNumber, type: 'Bicycle', color: bike.color ?? '—', owner: bike.currentOwner?.name ?? '—', location: '—', status: bike.status === 'ACTIVE' ? 'Verified' : 'Needs review', date: '' }, 'activity')
+  }
   const go = (next: Screen) => { setSaved(false); if (next === 'transaction') setTransactionStep(0); setScreen(next) }
 
-  if (screen === 'login') return <Login onLogin={() => go('home')} />
+  if (screen === 'login') return <Login onLogin={(user) => { setCurrentUser(user); setRole(user.role); go(user.role === 'ADMIN' ? 'admin-home' : 'home') }} />
 
   return <div className="terminal-shell">
     <header className="terminal-header">
-      {screen !== 'home' && <button className="back-button" onClick={() => go(screen === 'details' ? 'search' : 'home')} aria-label="Go back"><ArrowLeft size={17} /></button>}
+      {screen !== 'home' && screen !== 'admin-home' && <button className="back-button" onClick={() => go(screen === 'details' ? detailsOrigin : screen === 'transaction-record' ? transactionOrigin : role === 'ADMIN' ? 'admin-home' : 'home')} aria-label="Go back"><ArrowLeft size={17} /></button>}
       <strong>{screenTitle(screen)}</strong>
       <span className="wifi-badge" title="Online"><Wifi size={14} /></span>
     </header>
     <div className="terminal-content">
       {screen === 'home' && <HomeScreen onNavigate={go} onSelect={openDetails} />}
       {screen === 'admin-home' && <AdminHomeScreen onNavigate={go} />}
-      {screen === 'admin-transactions' && <AdminTransactionsScreen onNavigate={go} />}
-      {screen === 'transaction-record' && <AdminRecordScreen onNavigate={go} />}
+      {screen === 'admin-transactions' && <AdminTransactionsScreen onNavigate={go} onSelectTransaction={(id) => { setSelectedTransactionId(id); setTransactionOrigin('admin-transactions') }} />}
+      {screen === 'transaction-record' && <AdminRecordScreen transactionId={selectedTransactionId} onNavigate={go} />}
       {screen === 'flagged-queue' && <FlaggedQueueScreen onNavigate={go} />}
       {screen === 'bicycle-inventory' && <BicycleInventoryScreen onNavigate={go} />}
       {screen === 'ownership-chain' && <OwnershipChainScreen onNavigate={go} />}
       {screen === 'registry-profile' && <RegistryProfileScreen onNavigate={go} />}
-      {screen === 'agent-management' && <AgentManagementScreen onNavigate={go} />}
-      {screen === 'agent-onboarding' && <AgentOnboardingScreen onNavigate={go} />}
-      {screen === 'agent-terminal' && <AgentTerminalScreen onNavigate={go} />}
+      {screen === 'agent-management' && <AgentManagementScreen onNavigate={go} onSelectAgent={(a) => { setSelectedAgent(a); go('agent-terminal') }} />}
+      {screen === 'agent-onboarding' && <AgentOnboardingScreen onNavigate={(s) => { if (s !== 'agent-onboarding') setSelectedAgent(null); go(s) }} />}
+      {screen === 'agent-terminal' && <AgentTerminalScreen agent={selectedAgent} onNavigate={go} />}
       {screen === 'reports-exports' && <ReportsExportsScreen onNavigate={go} />}
       {screen === 'transaction' && <TransactionFlow step={transactionStep} setStep={setTransactionStep} saved={saved} onSave={() => setSaved(true)} onCancel={() => go('home')} onViewOwner={setOwnerDetails} />}
       {screen === 'register' && <RegisterScreen onSave={() => setSaved(true)} saved={saved} onCancel={() => go('home')} onViewOwner={setOwnerDetails} />}
       {screen === 'search' && <SearchScreen query={query} setQuery={setQuery} onSelect={openDetails} />}
-      {screen === 'details' && <DetailsScreen record={selected} />}
-      {screen === 'activity' && <ActivityScreen />}
-      {screen === 'profile' && <ProfileScreen onWarning={() => setWarning(true)} onLogout={() => { setRole('AGENT'); go('login') }} onAdmin={() => { setRole('ADMIN'); go('admin-home') }} />}
+      {screen === 'details' && selected && <DetailsScreen record={selected} />}
+      {screen === 'activity' && <ActivityScreen onOpenDetails={openDetailsById} onSelectTransaction={(id) => { setSelectedTransactionId(id); setTransactionOrigin('activity'); go('transaction-record') }} />}
+      {screen === 'profile' && <ProfileScreen user={currentUser} onWarning={() => setWarning(true)} onLogout={async () => { await api.logout().catch(() => undefined); setCurrentUser(null); setRole('AGENT'); go('login') }} onAdmin={() => { setRole('ADMIN'); go('admin-home') }} />}
     </div>
     {role === 'ADMIN' ? <AdminBottomNav screen={screen} onNavigate={go} /> : screen !== 'transaction' && screen !== 'register' && screen !== 'details' && <BottomNav screen={screen} onNavigate={go} />}
     {warning && <WarningModal onClose={() => setWarning(false)} />}
@@ -64,59 +81,197 @@ function screenTitle(screen: Screen) {
   return { home: 'Agent Dashboard', 'admin-home': 'Biketrack Admin', 'admin-transactions': 'All Transactions', 'transaction-record': 'Transaction Record', 'flagged-queue': 'Flagged Queue', 'bicycle-inventory': 'Bicycle Inventory', 'ownership-chain': 'Ownership Chain', 'registry-profile': 'Registry Profile', 'agent-management': 'Field Agent Management', 'agent-onboarding': 'Agent Onboarding', 'agent-terminal': 'Agent Terminal', 'reports-exports': 'Reports & Exports', transaction: 'New Transaction', register: 'Register Bicycle', search: 'Search Field Records', details: 'Transaction Details', activity: 'Recent Activity', profile: 'Agent Profile & Settings', login: 'Login' }[screen]
 }
 
-function Login({ onLogin }: { onLogin: () => void }) {
+function Login({ onLogin }: { onLogin: (user: { id: string; name: string; role: Role }) => void }) {
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const submit = async () => {
+    if (!email || !password) return
+    setLoading(true); setError(null)
+    try { const result = await api.login(email, password); onLogin(result.user) }
+    catch { setError('Invalid credentials') }
+    finally { setLoading(false) }
+  }
   return <main className="login-screen">
     <div className="login-hero"><div className="hero-bike"><Bike size={22} /></div><strong>CycleTrack</strong><small>FIELD AGENT TERMINAL</small></div>
-    <section className="login-panel"><p className="screen-kicker">SECURE ENTRY</p><p className="login-copy">Authorized personnel only. PIN required for field access.</p>
-      <label><span><Smartphone size={12} /> Agent phone</span><input placeholder="000-000-0000" /></label>
-      <label><span><LockKeyhole size={12} /> Security PIN</span><div className="password-input"><input type="password" placeholder="••••" /><Eye size={15} /></div></label>
-      <button className="action-button" onClick={onLogin}>Initialize terminal <ArrowRight size={16} /></button>
-      <button className="quiet-button">Forgot credentials?</button>
+    <section className="login-panel"><p className="screen-kicker">SECURE ENTRY</p><p className="login-copy">Authorized personnel only.</p>
+      <label><span><Smartphone size={12} /> Email</span><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="agent@example.com" /></label>
+      <label><span><LockKeyhole size={12} /> Password</span><div className="password-input"><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" /><Eye size={15} /></div></label>
+      {error && <p className="error-text" style={{color:'#e05'}}>{error}</p>}
+      <button className="action-button" disabled={loading || !email || !password} onClick={() => void submit()}>{loading ? 'Signing in...' : 'Initialize terminal'} <ArrowRight size={16} /></button>
     </section>
     <footer className="offline-bar"><span><Signal size={14} /> Connectivity</span><strong>Offline-ready mode</strong><small>v2.4.1-field</small></footer>
   </main>
 }
 
 function HomeScreen({ onNavigate, onSelect }: { onNavigate: (screen: Screen) => void; onSelect: (record: BicycleRecord) => void }) {
+  const { data: recentData } = useQuery({ queryKey: ['bicycles', '', 1], queryFn: () => api.listBicycles(undefined, 1) })
+  const [pendingCount, setPendingCount] = useState(0)
+  const [isOnline, setIsOnline] = useState(navigator.onLine)
+  const refreshPending = () =>
+    Promise.all([
+      db.pendingTransactions.toArray(),
+      db.pendingRegistrations.toArray(),
+      db.syncMetadata.toArray(),
+    ]).then(([txs, regs, meta]) => {
+      const blockedIds = new Set(meta.map((m) => m.key.replace(/^(conflict|error):/, '')))
+      const count = [...txs, ...regs].filter((r) => !blockedIds.has(r.id)).length
+      setPendingCount(count)
+    })
+  useEffect(() => {
+    refreshPending()
+    const interval = setInterval(refreshPending, 5000)
+    const on = () => { setIsOnline(true); refreshPending() }
+    const off = () => setIsOnline(false)
+    window.addEventListener('online', on); window.addEventListener('offline', off)
+    return () => { clearInterval(interval); window.removeEventListener('online', on); window.removeEventListener('offline', off) }
+  }, [])
+  const recentBike = recentData?.data[0] ?? null
+  const recentRecord: BicycleRecord | null = recentBike ? { id: recentBike.id, frameNumber: recentBike.frameNumber, name: `${recentBike.brand ?? ''} ${recentBike.model ?? ''}`.trim() || recentBike.frameNumber, type: 'Bicycle', color: recentBike.color ?? '—', owner: recentBike.currentOwner?.name ?? '—', location: '—', status: recentBike.status === 'ACTIVE' ? 'Verified' : 'Needs review', date: '' } : null
   return <>
     <section className="welcome"><p className="screen-kicker">LOGGED IN AS FIELD AGENT</p><h1>Operations Center</h1></section>
     <button className="feature-button" onClick={() => onNavigate('transaction')}><span className="feature-icon"><FileText size={22} /></span><span><strong>New Transaction</strong><small>Initiate bicycle sale or transfer</small></span><ArrowRight /></button>
     <button className="feature-button" onClick={() => onNavigate('register')}><span className="feature-icon"><Bike size={22} /></span><span><strong>Register Bicycle</strong><small>Capture serial & owner data</small></span><ArrowRight /></button>
     <div className="quick-grid"><button onClick={() => onNavigate('search')}><Search size={20} /><strong>Search</strong></button><button onClick={() => onNavigate('activity')}><Activity size={20} /><strong>Activity</strong></button></div>
-    <p className="section-label">Session intelligence</p><div className="intelligence"><div><small>Today's tasks</small><strong>12<span>/15</span></strong></div><div><small>Local cache</small><strong className="lime">42MB</strong></div><footer><Database size={13} /> Offline database v2.4.1 active</footer></div>
-    <p className="section-label">Last modified record</p><button className="record-row" onClick={() => onSelect(mockBicycles[0])}><span className="record-icon"><Bike size={18} /></span><span><strong>TXN-88290-B</strong><small>◷ Modified 14 mins ago</small></span><ChevronRight size={17} /></button>
+    <p className="section-label">Session intelligence</p><div className="intelligence"><div><small>Today's tasks</small><strong>{pendingCount > 0 ? `${pendingCount} pending sync` : 'All synced'}</strong></div><div><small>Local cache</small><strong className="lime">Active</strong></div>{!isOnline && <footer><Database size={13} /> Offline database active</footer>}</div>
+    {recentRecord && <><p className="section-label">Last modified record</p><button className="record-row" onClick={() => onSelect(recentRecord)}><span className="record-icon"><Bike size={18} /></span><span><strong>{recentRecord.frameNumber}</strong><small>◷ Most recent bicycle</small></span><ChevronRight size={17} /></button></>}
   </>
 }
 
 function AdminHomeScreen({ onNavigate }: { onNavigate: (screen: Screen) => void }) {
-  const metrics = [['Total registered', '14,282', '+12.5%', TrendingUp], ['Active agents', '184', '↑ 4', Users], ['Pending sync', '42', '-8%', Cloud], ['Flagged alerts', '09', '+2', Flag]] as const
-  const flags = [['Specialized Sirrus X 4.0', 'Stolen report match #SR-928', '14h ago'], ['Cannondale Topstone 1', 'Duplicate serial entry', '11h ago'], ['Trek Marlin 7 Gen 2', 'Invalid ownership transfer', '3h ago']]
+  const { data: dashData } = useQuery({ queryKey: ['dashboard'], queryFn: () => api.getDashboard() })
+  const stats = dashData?.data ?? null
+  const metrics = [['Total registered', stats ? String(stats.bicycles) : '…', TrendingUp], ['Active agents', stats ? String(stats.activeAgents) : '…', Users], ['Transactions', stats ? String(stats.transactions) : '…', Cloud], ['Flagged alerts', stats ? String(stats.flags) : '…', Flag]] as const
   const modules = [['Transactions', 'Historical log', Activity], ['Bicycles', 'Registry inventory', Bike], ['People', 'Owner directory', Users], ['Field agents', 'Team management', UserRound], ['Reports', 'Export & analytics', FileText], ['Flagged', 'Priority queue', Flag]] as const
   return <section className="admin-home">
     <div className="admin-brand"><span>BIKETRACK ADMIN</span><small>RECORD-KEEPING CONTROL CENTER</small></div>
-    <div className="admin-metrics">{metrics.map(([label, value, trend, Icon]) => <div className="admin-metric" key={label}><div><Icon size={14} /><b>{trend}</b></div><small>{label}</small><strong>{value}</strong></div>)}</div>
-    <div className="admin-section-heading"><span><Flag size={13} /> Flagged queue</span><button onClick={() => onNavigate('search')}>View all</button></div><p className="admin-subtitle">Immediate resolution required</p>
-    <div className="flag-list">{flags.map(([name, reason, time]) => <button key={name} className="flag-item" onClick={() => onNavigate('search')}><span><Flag size={13} /></span><strong>{name}<small>{reason}</small></strong><em>{time}</em></button>)}</div>
+    <div className="admin-metrics">{metrics.map(([label, value, Icon]) => <div className="admin-metric" key={label}><div><Icon size={14} /></div><small>{label}</small><strong>{value}</strong></div>)}</div>
+    <div className="admin-section-heading"><span><Flag size={13} /> Flagged queue</span><button onClick={() => onNavigate('flagged-queue')}>View all</button></div><p className="admin-subtitle">Immediate resolution required</p>
     <p className="admin-section-label"><TrendingUp size={11} /> Control modules</p><div className="module-grid">{modules.map(([label, copy, Icon], index) => <button key={label} className={index === 5 ? 'module danger' : 'module'} onClick={() => onNavigate(['admin-transactions', 'bicycle-inventory', 'registry-profile', 'agent-management', 'reports-exports', 'flagged-queue'][index] as Screen)}><Icon size={15} /><strong>{label}</strong><small>{copy}</small>{index === 5 && <b>!</b>}</button>)}</div>
     <button className="admin-register" onClick={() => onNavigate('register')}><Plus size={14} /> Register new bicycle</button>
-    <div className="admin-footer-actions"><button onClick={() => onNavigate('profile')}>Manage profile</button><button onClick={() => onNavigate('profile')}>System settings</button></div><p className="admin-integrity">"Integrity in every record, security in every chain."<br /><span>Last sync: 5:38:30 PM (UTC-5)</span></p>
+    <div className="admin-footer-actions"><button onClick={() => onNavigate('profile')}>Manage profile</button></div><p className="admin-integrity">"Integrity in every record, security in every chain."</p>
   </section>
 }
 
-function AdminTransactionsScreen({ onNavigate }: { onNavigate: (screen: Screen) => void }) {
+function AdminTransactionsScreen({ onNavigate, onSelectTransaction }: { onNavigate: (screen: Screen) => void; onSelectTransaction: (id: string) => void }) {
   const [query, setQuery] = useState('')
-  const transactions = mockAdminTransactions.filter((transaction) => `${transaction.id} ${transaction.bicycle} ${transaction.frameNumber} ${transaction.parties} ${transaction.agent}`.toLowerCase().includes(query.toLowerCase()))
-  return <section className="admin-transactions"><div className="admin-page-heading"><div><p className="screen-kicker">CONTROL MODULE</p><h1>All Transactions</h1><p>Network-wide historical record</p></div><button className="admin-icon-button" aria-label="Export transactions"><Send size={15} /></button></div><div className="admin-transaction-stats"><span><small>Total records</small><strong>3,672</strong></span><span><small>This month</small><strong>184</strong></span><span><small>Flagged</small><strong className="rust-number">09</strong></span></div><div className="admin-search"><Search size={14} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search ID, frame, owner..." /></div><div className="admin-filters"><button className="selected">All</button><button>Sales</button><button>Transfers</button><button>Flagged</button></div><p className="admin-result-count">Showing {transactions.length} of 3,672 transactions</p><div className="transaction-list">{transactions.map((transaction) => <button className="transaction-item" key={transaction.id} onClick={() => onNavigate('transaction-record')}><div className="transaction-item-head"><span className={`transaction-type ${transaction.type.toLowerCase()}`}>{transaction.type}</span><em className={transaction.status === 'Verified' ? 'verified' : transaction.status === 'Flagged' ? 'flagged' : 'pending'}>{transaction.status}</em></div><strong>{transaction.bicycle}</strong><small className="transaction-frame">{transaction.frameNumber} · {transaction.id}</small><div className="transaction-meta"><span>{transaction.parties}</span><span>{transaction.agent}</span><span>{transaction.date}</span></div><ChevronRight size={15} /></button>)}</div>{transactions.length === 0 && <p className="empty-state">No transactions match this search.</p>}<button className="secondary-button admin-load">Load more records</button></section>
+  const [filter, setFilter] = useState<string>('All')
+  const flagStatus = filter === 'Flagged' ? 'FLAGGED' : undefined
+  const { data, isLoading: loading } = useQuery({ queryKey: ['transactions', query, flagStatus], queryFn: () => api.listTransactions({ q: query || undefined, flagStatus }) })
+  const transactions = data?.data ?? []
+  return <section className="admin-transactions">
+    <div className="admin-page-heading"><div><p className="screen-kicker">CONTROL MODULE</p><h1>All Transactions</h1><p>Network-wide historical record</p></div>
+      <button className="admin-icon-button" aria-label="Export transactions" onClick={() => api.downloadTransactionsXlsx().catch(() => undefined)}><Send size={15} /></button>
+    </div>
+    <div className="admin-search"><Search size={14} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search ID, frame, owner..." /></div>
+    <div className="admin-filters">{['All','Sales','Transfers','Flagged'].map((f) => <button key={f} className={filter === f ? 'selected' : ''} onClick={() => setFilter(f)}>{f}</button>)}</div>
+    {loading && <p className="empty-state">Loading...</p>}
+    <div className="transaction-list">{transactions.map((t) => <button className="transaction-item" key={t.id} onClick={() => { onSelectTransaction(t.id); onNavigate('transaction-record') }}>
+      <div className="transaction-item-head"><span className={`transaction-type ${t.type.toLowerCase()}`}>{t.type}</span><em className={t.flagStatus === 'NONE' ? 'verified' : t.flagStatus === 'FLAGGED' ? 'flagged' : 'pending'}>{t.flagStatus}</em></div>
+      <strong>{t.bicycle.brand} {t.bicycle.model}</strong><small className="transaction-frame">{t.bicycle.frameNumber} · {t.transactionId}</small>
+      <div className="transaction-meta"><span>{t.seller?.name ?? '—'} → {t.buyer?.name ?? '—'}</span><span>{t.recordingAgent.name}</span><span>{new Date(t.transactionDate).toLocaleDateString()}</span></div>
+      <ChevronRight size={15} /></button>)}
+    </div>
+    {!loading && transactions.length === 0 && <p className="empty-state">No transactions match this search.</p>}
+  </section>
 }
 
-function AdminRecordScreen({ onNavigate }: { onNavigate: (screen: Screen) => void }) { return <AdminPanel title="Transaction Record" kicker="REFERENCE ID · TX-98422-BK"><div className="admin-record-alert"><ShieldAlert size={14} /><strong>Resolution required</strong><small>Flagged record requires administrator review.</small></div><AdminInfo title="Transaction summary" rows={['SALE · Nov 24, 2023 · 14:22 UTC', 'Specialized Sirrus X 4.0 · M2S-928', 'Marcus Thorne → Sarah Jenkins', 'Processed by AGENT_8821']} /><button className="admin-wide-button" onClick={() => onNavigate('flagged-queue')}>Open flagged queue</button></AdminPanel> }
-function FlaggedQueueScreen({ onNavigate }: { onNavigate: (screen: Screen) => void }) { return <AdminPanel title="Flagged Queue" kicker="ACTIVE INCIDENTS · 3"><div className="queue-metrics"><b>12<small>Urgent</small></b><b>08<small>Pending</small></b><b>45<small>Resolved</small></b></div>{['Specialized Rockhopper Expert', 'Cannondale Synapse Carbon', 'Trek Domane AL 2'].map((name) => <button className="incident-card" key={name} onClick={() => onNavigate('transaction-record')}><Flag size={14} /><strong>{name}<small>Serial mismatch and ownership validation required</small></strong><em>Review</em></button>)}</AdminPanel> }
-function BicycleInventoryScreen({ onNavigate }: { onNavigate: (screen: Screen) => void }) { return <AdminPanel title="Bicycle Inventory" kicker="REGISTRY INVENTORY"><div className="admin-search"><Search size={14} /><input placeholder="Search SN, Brand, or Owner..." /></div><div className="inventory-summary"><strong>1,284<small>Total records</small></strong><strong className="rust-number">42<small>Flagged units</small></strong></div>{mockBicycles.concat(mockBicycles).map((bike, index) => <button className="inventory-item" key={`${bike.id}-${index}`} onClick={() => onNavigate('ownership-chain')}><Bike size={18} /><strong>{bike.name}<small>SN: {bike.frameNumber} · {bike.owner}</small></strong><em>{index % 3 === 1 ? 'Flagged' : 'Registered'}</em><ChevronRight size={14} /></button>)}</AdminPanel> }
+function AdminRecordScreen({ transactionId, onNavigate }: { transactionId: string | null; onNavigate: (screen: Screen) => void }) {
+  const { data, isLoading } = useQuery({ queryKey: ['transaction', transactionId], queryFn: () => api.getTransaction(transactionId!), enabled: !!transactionId })
+  const t = data?.data
+  return <AdminPanel title="Transaction Record" kicker={t ? t.transactionId : 'LOADING...'}>
+    {isLoading && <p className="empty-state">Loading...</p>}
+    {t && <>
+      {t.flagStatus === 'FLAGGED' && <div className="admin-record-alert"><ShieldAlert size={14} /><strong>Resolution required</strong><small>{t.flagReason ?? 'Flagged record requires administrator review.'}</small></div>}
+      <AdminInfo title="Transaction summary" rows={[`${t.type} · ${new Date(t.transactionDate).toLocaleString()}`, `${t.bicycle.brand ?? ''} ${t.bicycle.model ?? ''} · ${t.bicycle.frameNumber}`, `${t.seller?.name ?? '—'} → ${t.buyer?.name ?? '—'}`, `Recorded by ${t.recordingAgent.name}`]} />
+      <em className={t.flagStatus === 'NONE' ? 'verified' : 'flagged'} style={{ display: 'block', marginBottom: 12 }}>{t.flagStatus}</em>
+    </> }
+    <button className="admin-wide-button" onClick={() => onNavigate('flagged-queue')}>Open flagged queue</button>
+  </AdminPanel>
+}
+function FlaggedQueueScreen({ onNavigate }: { onNavigate: (screen: Screen) => void }) {
+  const { data, isLoading: loading } = useQuery({ queryKey: ['transactions', '', 'FLAGGED'], queryFn: () => api.listTransactions({ flagStatus: 'FLAGGED' }) })
+  const flagged = data?.data ?? []
+  return <AdminPanel title="Flagged Queue" kicker={`ACTIVE INCIDENTS · ${flagged.length}`}><div className="queue-metrics"><b>{flagged.length}<small>Flagged</small></b><b>0<small>Pending</small></b><b>0<small>Resolved</small></b></div>{loading && <p className="empty-state">Loading...</p>}{flagged.map((t) => <button className="incident-card" key={t.id} onClick={() => onNavigate('transaction-record')}><Flag size={14} /><strong>{t.bicycle.brand} {t.bicycle.model}<small>{t.flagReason ?? 'Flagged for review'}</small></strong><em>Review</em></button>)}{!loading && flagged.length === 0 && <p className="empty-state">No flagged transactions.</p>}</AdminPanel>
+}
+function BicycleInventoryScreen({ onNavigate }: { onNavigate: (screen: Screen) => void }) {
+  const [q, setQ] = useState('')
+  const { data } = useQuery({ queryKey: ['bicycles', q], queryFn: () => api.listBicycles(q || undefined) })
+  const bicycles = data?.data ?? []
+  return <AdminPanel title="Bicycle Inventory" kicker="REGISTRY INVENTORY">
+    <div className="admin-search"><Search size={14} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search SN, Brand, or Owner..." /></div>
+    {bicycles.map((bike) => <button className="inventory-item" key={bike.id} onClick={() => onNavigate('ownership-chain')}><Bike size={18} /><strong>{bike.brand} {bike.model}<small>SN: {bike.frameNumber} · {bike.currentOwner?.name ?? '—'}</small></strong><em>{bike.status}</em><ChevronRight size={14} /></button>)}
+    {bicycles.length === 0 && <p className="empty-state">No bicycles found.</p>}
+  </AdminPanel>
+}
 function OwnershipChainScreen({ onNavigate }: { onNavigate: (screen: Screen) => void }) { return <AdminPanel title="Ownership Chain" kicker="SPECIALIZED ROCKHOPPER ELITE"><div className="chain-card"><small>Current owner</small><strong>Marcus Vane</strong><span>Field Protocol 04</span></div>{['Registration · Feb 14, 2024', 'Transfer · Jan 20, 2024', 'Resolution · Nov 15, 2023'].map((event) => <div className="chain-event" key={event}><span></span><strong>{event}<small>Verified record with audit metadata and location.</small></strong></div>)}<button className="admin-wide-button" onClick={() => onNavigate('transaction-record')}>Full export</button></AdminPanel> }
 function RegistryProfileScreen({ onNavigate }: { onNavigate: (screen: Screen) => void }) { return <AdminPanel title="Registry Profile" kicker="MARCUS V. STERLING"><div className="registry-identity"><span className="profile-avatar">MV</span><strong>Verified registry owner<small>REG-99285-MV · Sector 4 Administrative District</small></strong></div><div className="inventory-summary"><strong>2<small>Currently owned</small></strong><strong className="rust-number">1<small>System flags</small></strong></div><button className="inventory-item" onClick={() => onNavigate('bicycle-inventory')}><Bike size={18} /><strong>Specialized Rockhopper Expert<small>SP-88218-Z2 · Active residence</small></strong><em>Registered</em></button><button className="inventory-item"><Bike size={18} /><strong>Cannondale Quick Disc 3<small>CN-11923-Q · Active residence</small></strong><em>Registered</em></button></AdminPanel> }
-function AgentManagementScreen({ onNavigate }: { onNavigate: (screen: Screen) => void }) { const [agents, setAgents] = useState(['Marcus Thorne', 'Sarah Jenkins', 'David Vance', 'Elena Rodriguez']); const [pendingDelete, setPendingDelete] = useState<string | null>(null); const deleteAgent = (name: string) => { setAgents((current) => current.filter((agent) => agent !== name)); setPendingDelete(null) }; return <AdminPanel title="Field Agent Management" kicker="AUTHORIZED PERSONNEL"><div className="admin-search"><Search size={14} /><input placeholder="Search by name or ID..." /></div><div className="inventory-summary"><strong>{agents.length}<small>Total</small></strong><strong>18<small>Active</small></strong><strong>06<small>Deploy</small></strong></div>{agents.map((name) => <div className="agent-item" key={name}><button className="agent-main" onClick={() => onNavigate('agent-terminal')}><span className="profile-avatar">{name.split(' ').map((part) => part[0]).join('')}</span><strong>{name}<small>ONLINE · Field Agent · 142 records</small></strong><ChevronRight size={14} /></button><button className="delete-agent" onClick={() => setPendingDelete(name)} aria-label={`Delete ${name}`} title="Delete agent"><Trash2 size={14} /></button></div>)}<button className="admin-wide-button" onClick={() => onNavigate('agent-onboarding')}><Plus size={14} /> Onboard new agent</button>{pendingDelete && <div className="delete-confirm"><p>Delete <strong>{pendingDelete}</strong>?</p><small>This removes the agent from the local admin preview. Existing records remain auditable.</small><div><button onClick={() => setPendingDelete(null)}>Cancel</button><button className="danger-confirm" onClick={() => deleteAgent(pendingDelete)}>Delete agent</button></div></div>}</AdminPanel> }
-function AgentOnboardingScreen({ onNavigate }: { onNavigate: (screen: Screen) => void }) { const [phone, setPhone] = useState(''); const [pin, setPin] = useState(''); return <AdminPanel title="Agent Onboarding" kicker="STEP 1 OF 2"><label>Full legal name<input placeholder="e.g. Marcus Thorne" /></label><label>Assigned tactical ID<input placeholder="BT-AGENT-772" /></label><div className="two-fields"><label>Operational role<select><option>Field Agent</option><option>Supervisor</option></select></label><label>Clearance level<select><option>Level 01</option><option>Level 02</option></select></label></div><label>Official phone number<input value={phone} onChange={(event) => setPhone(event.target.value)} type="tel" placeholder="+233 24 000 0000" /></label><label>Security PIN<input value={pin} onChange={(event) => setPin(event.target.value)} type="password" inputMode="numeric" maxLength={6} placeholder="Create 4-6 digit PIN" /></label><label>Official email address<input placeholder="agent.name@biketrack.gov" /></label><button className="admin-wide-button" disabled={!phone || pin.length < 4} onClick={() => onNavigate('agent-management')}>Create agent credentials <ArrowRight size={14} /></button></AdminPanel> }
-function AgentTerminalScreen({ onNavigate }: { onNavigate: (screen: Screen) => void }) { return <AdminPanel title="Agent Terminal" kicker="MARCUS THORNE · LEVEL 3 AGENT"><div className="inventory-summary"><strong>12<small>Logins today</small></strong><strong>98.4%<small>Success rate</small></strong></div><p className="admin-section-label">Access protocols</p>{['New registration', 'Asset transfers', 'Flag authority', 'Remote override'].map((name, index) => <div className="protocol-row" key={name}><ShieldCheck size={14} /><strong>{name}<small>{index < 2 ? 'Allow agent to record and sync records' : 'Grant power to review suspicious assets'}</small></strong><span className={index < 2 ? 'toggle on' : 'toggle'} /></div>)}<button className="admin-wide-button" onClick={() => onNavigate('agent-management')}>Return to agents</button></AdminPanel> }
+function AgentManagementScreen({ onNavigate, onSelectAgent }: { onNavigate: (screen: Screen) => void; onSelectAgent: (agent: api.Agent) => void }) {
+  const [pendingRevoke, setPendingRevoke] = useState<string | null>(null)
+  const [q, setQ] = useState('')
+  const queryClient = useQueryClient()
+  const { data, isLoading: loading } = useQuery({ queryKey: ['agents'], queryFn: () => api.listAgents() })
+  const agents = data?.data ?? []
+  const { mutate: revoke } = useMutation({ mutationFn: (id: string) => api.revokeAgent(id), onSuccess: (_, id) => { queryClient.setQueryData<typeof data>(['agents'], (old) => old ? { data: old.data.map((ag) => ag.id === id ? { ...ag, isActive: false } : ag) } : old); setPendingRevoke(null) } })
+  const filtered = agents.filter((a) => a.name.toLowerCase().includes(q.toLowerCase()) || a.email.toLowerCase().includes(q.toLowerCase()))
+  return <AdminPanel title="Field Agent Management" kicker="AUTHORIZED PERSONNEL">
+    <div className="admin-search"><Search size={14} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name or email..." /></div>
+    {loading && <p className="empty-state">Loading...</p>}
+    {filtered.map((agent) => <div className="agent-item" key={agent.id}>
+      <button className="agent-main" onClick={() => onSelectAgent(agent)}>
+        <span className="profile-avatar">{agent.name.split(' ').map((p) => p[0]).join('').slice(0,2)}</span>
+        <strong>{agent.name}<small>{agent.isActive ? 'ACTIVE' : 'REVOKED'} · {agent._count.transactions} records</small></strong>
+        <ChevronRight size={14} />
+      </button>
+      {agent.isActive && <button className="delete-agent" onClick={() => setPendingRevoke(agent.id)} aria-label={`Revoke ${agent.name}`}><Trash2 size={14} /></button>}
+    </div>)}
+    {!loading && filtered.length === 0 && <p className="empty-state">No agents found.</p>}
+    <button className="admin-wide-button" onClick={() => onNavigate('agent-onboarding')}><Plus size={14} /> Onboard new agent</button>
+    {pendingRevoke && <div className="delete-confirm"><p>Revoke this agent?</p><small>They will no longer be able to log in.</small><div><button onClick={() => setPendingRevoke(null)}>Cancel</button><button className="danger-confirm" onClick={() => revoke(pendingRevoke)}>Revoke agent</button></div></div>}
+  </AdminPanel>
+}
+function AgentOnboardingScreen({ onNavigate }: { onNavigate: (screen: Screen) => void }) {
+  const [form, setForm] = useState({ name: '', email: '', phone: '', password: '' })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const queryClient = useQueryClient()
+  const update = (key: keyof typeof form, value: string) => setForm((f) => ({ ...f, [key]: value }))
+  const submit = async () => {
+    setSaving(true); setError(null)
+    try { await api.createAgent({ name: form.name, email: form.email, phone: form.phone || undefined, password: form.password }); queryClient.invalidateQueries({ queryKey: ['agents'] }); onNavigate('agent-management') }
+    catch { setError('Failed to create agent. Check all fields and try again.') }
+    finally { setSaving(false) }
+  }
+  const ready = form.name.trim() && form.email.trim() && form.password.length >= 12
+  return <AdminPanel title="Agent Onboarding" kicker="NEW FIELD AGENT">
+    <label>Full legal name<input value={form.name} onChange={(e) => update('name', e.target.value)} placeholder="e.g. Marcus Thorne" /></label>
+    <label>Official email<input type="email" value={form.email} onChange={(e) => update('email', e.target.value)} placeholder="agent@biketrack.gov" /></label>
+    <label>Phone number<input type="tel" value={form.phone} onChange={(e) => update('phone', e.target.value)} placeholder="+233 24 000 0000" /></label>
+    <label>Password (min 12 chars)<input type="password" value={form.password} onChange={(e) => update('password', e.target.value)} placeholder="••••••••••••" /></label>
+    {error && <p className="error-text" style={{ color: '#e05' }}>{error}</p>}
+    <button className="admin-wide-button" disabled={!ready || saving} onClick={() => void submit()}>{saving ? 'Creating...' : 'Create agent credentials'} <ArrowRight size={14} /></button>
+  </AdminPanel>
+}
+function AgentTerminalScreen({ agent, onNavigate }: { agent: api.Agent | null; onNavigate: (screen: Screen) => void }) {
+  const initials = agent ? agent.name.split(' ').map((p) => p[0]).join('').slice(0, 2) : '??'
+  return <AdminPanel title="Agent Terminal" kicker={agent ? `${agent.name.toUpperCase()} · ${agent.isActive ? 'ACTIVE' : 'REVOKED'}` : 'AGENT DETAILS'}>
+    <div className="registry-identity">
+      <span className="profile-avatar">{initials}</span>
+      <span><strong>{agent?.name ?? '—'}</strong><small>{agent?.email ?? '—'}</small></span>
+    </div>
+    {agent && <div className="admin-info">
+      <h2>Agent details</h2>
+      <p>Phone: {agent.phone ?? '—'}</p>
+      <p>Status: {agent.isActive ? 'Active' : 'Revoked'}</p>
+      <p>Transactions recorded: {agent._count.transactions}</p>
+      <p>Member since: {new Date(agent.createdAt).toLocaleDateString()}</p>
+    </div>}
+    <p className="admin-section-label">Access protocols</p>
+    {['New registration', 'Asset transfers', 'Flag authority', 'Remote override'].map((name, index) => <div className="protocol-row" key={name}><ShieldCheck size={14} /><strong>{name}<small>{index < 2 ? 'Allow agent to record and sync records' : 'Grant power to review suspicious assets'}</small></strong><span className={index < 2 ? 'toggle on' : 'toggle'} /></div>)}
+    <button className="admin-wide-button" onClick={() => onNavigate('agent-management')}>Return to agents</button>
+  </AdminPanel>
+}
 function ReportsExportsScreen({ onNavigate }: { onNavigate: (screen: Screen) => void }) { return <AdminPanel title="Reports & Exports" kicker="ADVANCED ANALYTICS"><div className="report-hero"><TrendingUp size={25} /><strong>Generate encrypted audit reports</strong><small>Industry-standard audit trails and operational summaries.</small></div>{['Transaction audit log', 'Agent performance', 'Flagged incident summary', 'Inventory status'].map((name) => <button className="report-option" key={name}><FileText size={15} /><strong>{name}<small>Full history of registry actions and transactions</small></strong><ChevronRight size={14} /></button>)}<button className="admin-wide-button" onClick={() => onNavigate('admin-home')}>Preview report data</button></AdminPanel> }
 function AdminPanel({ title, kicker, children }: { title: string; kicker: string; children: ReactNode }) { return <section className="admin-panel"><p className="screen-kicker">{kicker}</p><h1>{title}</h1>{children}</section> }
 function AdminInfo({ title, rows }: { title: string; rows: string[] }) { return <div className="admin-info"><h2>{title}</h2>{rows.map((row) => <p key={row}>{row}</p>)}</div> }
@@ -133,9 +288,55 @@ function TransactionFlow({ step, setStep, saved, onSave, onCancel, onViewOwner }
   const [serialConfirmed, setSerialConfirmed] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const update = <K extends keyof TransactionDraft>(key: K, value: TransactionDraft[K]) => setDraft((current) => ({ ...current, [key]: value }))
-  const verifySerial = async () => { const normalized = draft.frameNumber.trim().toLowerCase(); const bicycle = mockBicycles.find((item) => item.frameNumber.toLowerCase() === normalized); const cachedBicycle = (await db.cachedBicycles.toArray()).find((record) => ((record.data as { frameNumber?: string }).frameNumber ?? '').toLowerCase() === normalized); const cachedOwnerId = cachedBicycle ? (cachedBicycle.data as { currentOwnerId?: string }).currentOwnerId : undefined; const cachedOwner = cachedOwnerId ? (await db.cachedPeople.get(cachedOwnerId))?.data as PersonRecord | undefined : undefined; setSerialOwner(bicycle ? mockPeople.find((person) => person.name === bicycle.owner) ?? null : cachedOwner ?? null); setSerialFound(Boolean(bicycle || cachedBicycle)); setSerialConfirmed(false); setSerialChecked(true) }
+  const verifySerial = async () => {
+    const normalized = draft.frameNumber.trim()
+    if (!normalized) return
+    setSerialChecked(false)
+    try {
+      const result = await api.listBicycles(normalized)
+      const match = result.data.find((b) => b.frameNumber.toLowerCase() === normalized.toLowerCase())
+      if (match) {
+        const owner = match.currentOwner ? { id: match.currentOwner.id, name: match.currentOwner.name, nationalId: (match.currentOwner as api.Person).nationalId ?? '', phone: (match.currentOwner as api.Person).phone ?? '', cell: (match.currentOwner as api.Person).cell ?? '', sector: (match.currentOwner as api.Person).sector ?? '', village: (match.currentOwner as api.Person).village ?? '' } : null
+        setSerialOwner(owner); setSerialFound(true)
+      } else {
+        setSerialOwner(null); setSerialFound(false)
+      }
+    } catch {
+      // offline — fall back to Dexie cache
+      const cachedBicycle = (await db.cachedBicycles.toArray()).find((r) => ((r.data as { frameNumber?: string }).frameNumber ?? '').toLowerCase() === normalized.toLowerCase())
+      const cachedOwnerId = cachedBicycle ? (cachedBicycle.data as { currentOwnerId?: string }).currentOwnerId : undefined
+      const cachedOwner = cachedOwnerId ? (await db.cachedPeople.get(cachedOwnerId))?.data as PersonRecord | undefined : undefined
+      setSerialOwner(cachedOwner ?? null); setSerialFound(Boolean(cachedBicycle))
+    }
+    setSerialConfirmed(false); setSerialChecked(true)
+  }
   const total = (Number(draft.bicyclePrice) || 0) + (Number(draft.serviceFee) || 0)
-  const saveTransaction = async () => { setIsSaving(true); const bicycleId = `bicycle-${draft.frameNumber.trim().toLowerCase()}`; const cachedPeople = await db.cachedPeople.toArray(); const parties = [{ name: draft.sellerName, nationalId: draft.sellerNationalId, phone: draft.sellerPhone, cell: draft.sellerCell, sector: draft.sellerSector, village: draft.sellerVillage }, { name: draft.buyerName, nationalId: draft.buyerNationalId, phone: draft.buyerPhone, cell: draft.buyerCell, sector: draft.buyerSector, village: draft.buyerVillage }]; const personRefs = parties.map((party) => { const existing = mockPeople.find((person) => person.nationalId.toLowerCase() === party.nationalId.trim().toLowerCase()) ?? cachedPeople.find((record) => (record.data as PersonRecord).nationalId?.toLowerCase() === party.nationalId.trim().toLowerCase()); return existing?.id ?? `person-${party.nationalId.trim()}` }); for (const [index, party] of parties.entries()) { const alreadyStored = mockPeople.some((person) => person.nationalId.toLowerCase() === party.nationalId.trim().toLowerCase()) || cachedPeople.some((record) => (record.data as PersonRecord).nationalId?.toLowerCase() === party.nationalId.trim().toLowerCase()); if (!alreadyStored && party.nationalId.trim()) await db.cachedPeople.put({ id: personRefs[index], data: { id: personRefs[index], ...party }, updatedAt: Date.now() }) } await db.cachedBicycles.put({ id: bicycleId, data: { frameNumber: draft.frameNumber, brand: draft.bicycleBrand, model: draft.bicycleModel, color: draft.bicycleColor, distinguishingFeatures: draft.distinguishingFeatures }, updatedAt: Date.now() }); await db.pendingTransactions.put({ id: crypto.randomUUID(), payload: { ...draft, total, bicycleId, sellerPersonId: personRefs[0], buyerPersonId: personRefs[1], queuedAt: new Date().toISOString() }, createdAt: Date.now() }); setIsSaving(false); onSave() }
+  const saveTransaction = async () => {
+    setIsSaving(true)
+    const clientOperationId = crypto.randomUUID()
+    try {
+      const [seller, buyer, bicycle] = await Promise.all([
+        draft.sellerNationalId.trim() ? api.upsertPersonByNationalId({ name: draft.sellerName, nationalId: draft.sellerNationalId, phone: draft.sellerPhone, cell: draft.sellerCell, sector: draft.sellerSector, village: draft.sellerVillage }) : Promise.resolve(null),
+        api.upsertPersonByNationalId({ name: draft.buyerName, nationalId: draft.buyerNationalId, phone: draft.buyerPhone, cell: draft.buyerCell, sector: draft.buyerSector, village: draft.buyerVillage }),
+        api.upsertBicycleByFrameNumber({ frameNumber: draft.frameNumber, brand: draft.bicycleBrand, model: draft.bicycleModel, color: draft.bicycleColor, distinguishingFeatures: draft.distinguishingFeatures }),
+      ])
+      const payload = {
+        type: draft.type, bicycleId: bicycle.id, sellerId: seller?.id, buyerId: buyer.id,
+        price: draft.type === 'SALE' ? Number(draft.bicyclePrice) : undefined,
+        serviceFee: Number(draft.serviceFee) || undefined, reason: draft.reason || undefined,
+      }
+      await db.pendingTransactions.put({ id: clientOperationId, payload, createdAt: Date.now() })
+    } catch {
+      // offline — store _raw natural keys, server resolves IDs on sync
+      await db.pendingTransactions.put({
+        id: clientOperationId,
+        payload: { _raw: { type: draft.type, bicycle: { frameNumber: draft.frameNumber, brand: draft.bicycleBrand, model: draft.bicycleModel, color: draft.bicycleColor, distinguishingFeatures: draft.distinguishingFeatures }, seller: draft.sellerNationalId.trim() ? { name: draft.sellerName, nationalId: draft.sellerNationalId, phone: draft.sellerPhone, cell: draft.sellerCell, sector: draft.sellerSector, village: draft.sellerVillage } : undefined, buyer: { name: draft.buyerName, nationalId: draft.buyerNationalId, phone: draft.buyerPhone, cell: draft.buyerCell, sector: draft.buyerSector, village: draft.buyerVillage }, price: draft.type === 'SALE' ? Number(draft.bicyclePrice) : undefined, serviceFee: Number(draft.serviceFee) || undefined, reason: draft.reason || undefined } },
+        createdAt: Date.now(),
+      })
+    }
+    await import('./lib/sync').then(({ flushPendingOperations }) => flushPendingOperations()).catch(() => undefined)
+    setIsSaving(false); onSave()
+  }
   if (saved) return <Success title="Transaction queued" copy="The bicycle and transaction are saved locally. They will sync when connectivity returns." onDone={onCancel} />
   const steps = ['Type', 'Serial', 'Bicycle', 'Parties', 'Review', 'Done']
   const next = () => { if (step === 0) setStep(1); else if (step === 1 && serialChecked && (!serialFound || serialConfirmed)) setStep(serialFound ? 3 : 2); else if (step === 2) setStep(3); else if (step === 3) setStep(4); else if (step === 4) void saveTransaction() }
@@ -156,23 +357,35 @@ function PartyStep({ draft, update }: { draft: TransactionDraft; update: <K exte
 function PartyFields({ label, prefix, draft, update }: { label: string; prefix: 'seller' | 'buyer'; draft: TransactionDraft; update: <K extends keyof TransactionDraft>(key: K, value: TransactionDraft[K]) => void }) {
   const [lookupState, setLookupState] = useState<'idle' | 'checking' | 'found' | 'missing'>('idle')
   const lookup = async () => {
-    const nationalId = draft[`${prefix}NationalId`].trim().toLowerCase()
+    const nationalId = draft[`${prefix}NationalId`].trim()
     if (!nationalId) return
     setLookupState('checking')
-    const mockPerson = mockPeople.find((person) => person.nationalId.toLowerCase() === nationalId)
-    const cachedPerson = mockPerson ? undefined : (await db.cachedPeople.toArray()).map((record) => record.data as PersonRecord).find((person) => person.nationalId?.toLowerCase() === nationalId)
-    const person = mockPerson ?? cachedPerson
-    if (!person) { setLookupState('missing'); return }
-    update(`${prefix}Name`, person.name)
-    update(`${prefix}NationalId`, person.nationalId)
-    update(`${prefix}Phone`, person.phone)
-    update(`${prefix}Cell`, person.cell)
-    update(`${prefix}Sector`, person.sector)
-    update(`${prefix}Village`, person.village)
-    setLookupState('found')
+    try {
+      const result = await api.listPeople(nationalId)
+      const person = result.data.find((p) => p.nationalId.toLowerCase() === nationalId.toLowerCase())
+      if (!person) { setLookupState('missing'); return }
+      update(`${prefix}Name`, person.name)
+      update(`${prefix}NationalId`, person.nationalId)
+      update(`${prefix}Phone`, person.phone ?? '')
+      update(`${prefix}Cell`, person.cell ?? '')
+      update(`${prefix}Sector`, person.sector ?? '')
+      update(`${prefix}Village`, person.village ?? '')
+      setLookupState('found')
+    } catch {
+      // offline — fall back to Dexie cache
+      const cachedPerson = (await db.cachedPeople.toArray()).map((r) => r.data as PersonRecord).find((p) => p.nationalId?.toLowerCase() === nationalId.toLowerCase())
+      if (!cachedPerson) { setLookupState('missing'); return }
+      update(`${prefix}Name`, cachedPerson.name)
+      update(`${prefix}NationalId`, cachedPerson.nationalId)
+      update(`${prefix}Phone`, cachedPerson.phone)
+      update(`${prefix}Cell`, cachedPerson.cell)
+      update(`${prefix}Sector`, cachedPerson.sector)
+      update(`${prefix}Village`, cachedPerson.village)
+      setLookupState('found')
+    }
   }
   const status = lookupState === 'found' ? <div className="person-link-status found"><Check size={13} /> Existing person linked from database</div> : lookupState === 'missing' ? <div className="person-link-status missing"><UserRound size={13} /> Person not found. Complete the fields to create a new person.</div> : null
-  return <fieldset className="party-fieldset"><legend>{label}</legend><div className="person-id-lookup"><label>National ID (primary key)<input value={draft[`${prefix}NationalId`]} onChange={(event) => { update(`${prefix}NationalId`, event.target.value); setLookupState('idle') }} placeholder="Enter national ID first" /></label><button className="secondary-button" disabled={lookupState === 'checking'} onClick={() => void lookup()}>{lookupState === 'checking' ? 'Checking...' : 'Look up person'}</button></div>{status}<label>Name<input value={draft[`${prefix}Name`]} readOnly={lookupState === 'found'} onChange={(event) => update(`${prefix}Name`, event.target.value)} placeholder="Full legal name" /></label><div className="two-fields"><label>Phone<input value={draft[`${prefix}Phone`]} readOnly={lookupState === 'found'} onChange={(event) => update(`${prefix}Phone`, event.target.value)} placeholder="Primary phone" /></label><label>Cell<input value={draft[`${prefix}Cell`]} readOnly={lookupState === 'found'} onChange={(event) => update(`${prefix}Cell`, event.target.value)} placeholder="Cell number" /></label></div><div className="two-fields"><label>Sector<input value={draft[`${prefix}Sector`]} readOnly={lookupState === 'found'} onChange={(event) => update(`${prefix}Sector`, event.target.value)} placeholder="Sector" /></label><label>Village<input value={draft[`${prefix}Village`]} readOnly={lookupState === 'found'} onChange={(event) => update(`${prefix}Village`, event.target.value)} placeholder="Village" /></label></div></fieldset>
+  return <fieldset className="party-fieldset"><legend>{label}</legend><div className="person-id-lookup"><label>National ID (16 characters)<input value={draft[`${prefix}NationalId`]} maxLength={16} onChange={(event) => { update(`${prefix}NationalId`, event.target.value); setLookupState('idle') }} placeholder="Enter 16-character national ID" /></label><button className="secondary-button" disabled={lookupState === 'checking' || draft[`${prefix}NationalId`].length !== 16} onClick={() => void lookup()}>{lookupState === 'checking' ? 'Checking...' : 'Look up person'}</button></div>{status}<label>Name<input value={draft[`${prefix}Name`]} readOnly={lookupState === 'found'} onChange={(event) => update(`${prefix}Name`, event.target.value)} placeholder="Full legal name" /></label><div className="two-fields"><label>Phone<input value={draft[`${prefix}Phone`]} readOnly={lookupState === 'found'} onChange={(event) => update(`${prefix}Phone`, event.target.value)} placeholder="Primary phone" /></label><label>Cell<input value={draft[`${prefix}Cell`]} readOnly={lookupState === 'found'} onChange={(event) => update(`${prefix}Cell`, event.target.value)} placeholder="Cell number" /></label></div><div className="two-fields"><label>Sector<input value={draft[`${prefix}Sector`]} readOnly={lookupState === 'found'} onChange={(event) => update(`${prefix}Sector`, event.target.value)} placeholder="Sector" /></label><label>Village<input value={draft[`${prefix}Village`]} readOnly={lookupState === 'found'} onChange={(event) => update(`${prefix}Village`, event.target.value)} placeholder="Village" /></label></div></fieldset>
 }
 function ReviewStep({ draft, total, onPrint }: { draft: TransactionDraft; total: number; onPrint: () => void }) { return <div className="flow-body"><h2>Review transaction</h2><p>Check the record before saving. The PDF is formatted for printing and contains the transaction summary.</p><div className="review-summary"><span>Transaction type<strong>{draft.type === 'SALE' ? 'Ownership transfer / sale' : 'Ownership transfer'}</strong></span><span>Bicycle<strong>{draft.bicycleBrand || 'New'} {draft.bicycleModel || 'record'} · {draft.frameNumber || 'No serial'}</strong></span><span>Seller and buyer<strong>{draft.sellerName || 'Seller pending'} → {draft.buyerName || 'Buyer pending'}</strong></span><span>Amounts<strong>Bicycle {draft.bicyclePrice || '0.00'} + service {draft.serviceFee || '0.00'} = {total.toFixed(2)}</strong></span></div><button className="secondary-button print-button" onClick={onPrint}><FileText size={15} /> Preview / print transaction PDF</button><div className="audit-note"><ShieldCheck size={15} /> This action will be added to the audit log.</div></div> }
 
@@ -191,9 +404,55 @@ function RegisterScreen({ saved, onSave, onCancel, onViewOwner }: { saved: boole
   const [newPerson, setNewPerson] = useState({ name: '', nationalId: '', phone: '', cell: '', sector: '', village: '' })
   const updateBicycle = (key: keyof Omit<RegistrationDraft, 'person'>, value: string) => setDraft((current) => ({ ...current, [key]: value }))
   const updatePerson = (key: keyof typeof newPerson, value: string) => setNewPerson((current) => ({ ...current, [key]: value }))
-  const verifySerial = async () => { const normalized = draft.frameNumber.trim().toLowerCase(); const bicycle = mockBicycles.find((item) => item.frameNumber.toLowerCase() === normalized); const cachedBicycle = (await db.cachedBicycles.toArray()).find((record) => ((record.data as { frameNumber?: string }).frameNumber ?? '').toLowerCase() === normalized); const cachedOwnerId = cachedBicycle ? (cachedBicycle.data as { currentOwnerId?: string }).currentOwnerId : undefined; const cachedOwner = cachedOwnerId ? (await db.cachedPeople.get(cachedOwnerId))?.data as PersonRecord | undefined : undefined; const owner = bicycle ? mockPeople.find((person) => person.name === bicycle.owner) ?? null : cachedOwner ?? null; setSerialOwner(owner); setSerialConfirmed(false); setSerialChecked(true) }
-  const findPerson = () => { setPersonChecked(true); const person = mockPeople.find((item) => `${item.name} ${item.nationalId}`.toLowerCase().includes(personQuery.toLowerCase().trim())); if (person) setDraft((current) => ({ ...current, person })) }
-  const saveRegistration = async () => { if (!draft.person) return; setIsSaving(true); const personId = draft.person.id || `person-${draft.person.nationalId}`; const bicycleId = `bicycle-${draft.frameNumber.trim().toLowerCase()}`; await db.cachedPeople.put({ id: personId, data: draft.person, updatedAt: Date.now() }); await db.cachedBicycles.put({ id: bicycleId, data: { frameNumber: draft.frameNumber, brand: draft.brand, model: draft.model, color: draft.color, distinguishingFeatures: draft.features, currentOwnerId: personId }, updatedAt: Date.now() }); await db.pendingRegistrations.put({ id: crypto.randomUUID(), payload: { bicycleId, ownerId: personId, bicycle: draft, recordedAt: new Date().toISOString() }, createdAt: Date.now() }); setIsSaving(false); onSave() }
+  const verifySerial = async () => {
+    const normalized = draft.frameNumber.trim()
+    if (!normalized) return
+    setSerialChecked(false)
+    try {
+      const result = await api.listBicycles(normalized)
+      const match = result.data.find((b) => b.frameNumber.toLowerCase() === normalized.toLowerCase())
+      const owner = match?.currentOwner ? { id: match.currentOwner.id, name: match.currentOwner.name, nationalId: (match.currentOwner as api.Person).nationalId ?? '', phone: (match.currentOwner as api.Person).phone ?? '', cell: (match.currentOwner as api.Person).cell ?? '', sector: (match.currentOwner as api.Person).sector ?? '', village: (match.currentOwner as api.Person).village ?? '' } : null
+      setSerialOwner(owner)
+    } catch {
+      const cachedBicycle = (await db.cachedBicycles.toArray()).find((r) => ((r.data as { frameNumber?: string }).frameNumber ?? '').toLowerCase() === normalized.toLowerCase())
+      const cachedOwnerId = cachedBicycle ? (cachedBicycle.data as { currentOwnerId?: string }).currentOwnerId : undefined
+      const cachedOwner = cachedOwnerId ? (await db.cachedPeople.get(cachedOwnerId))?.data as PersonRecord | undefined : undefined
+      setSerialOwner(cachedOwner ?? null)
+    }
+    setSerialConfirmed(false); setSerialChecked(true)
+  }
+  const findPerson = async () => {
+    setPersonChecked(true)
+    try {
+      const result = await api.listPeople(personQuery.trim())
+      const match = result.data[0] ?? null
+      if (match) setDraft((current) => ({ ...current, person: { id: match.id, name: match.name, nationalId: match.nationalId, phone: match.phone ?? '', cell: match.cell ?? '', sector: match.sector ?? '', village: match.village ?? '' } }))
+      else setDraft((current) => ({ ...current, person: null }))
+    } catch {
+      setDraft((current) => ({ ...current, person: null }))
+    }
+  }
+  const saveRegistration = async () => {
+    if (!draft.person) return
+    setIsSaving(true)
+    const clientOperationId = crypto.randomUUID()
+    try {
+      const [person, bicycle] = await Promise.all([
+        api.upsertPersonByNationalId({ name: draft.person.name, nationalId: draft.person.nationalId, phone: draft.person.phone, cell: draft.person.cell, sector: draft.person.sector, village: draft.person.village }),
+        api.upsertBicycleByFrameNumber({ frameNumber: draft.frameNumber, brand: draft.brand, model: draft.model, color: draft.color, distinguishingFeatures: draft.features }),
+      ])
+      await db.pendingRegistrations.put({ id: clientOperationId, payload: { bicycleId: bicycle.id, ownerId: person.id }, createdAt: Date.now() })
+    } catch {
+      // offline — store _raw natural keys, server resolves IDs on sync
+      await db.pendingRegistrations.put({
+        id: clientOperationId,
+        payload: { _raw: { bicycle: { frameNumber: draft.frameNumber, brand: draft.brand, model: draft.model, color: draft.color, distinguishingFeatures: draft.features }, person: { name: draft.person.name, nationalId: draft.person.nationalId, phone: draft.person.phone, cell: draft.person.cell, sector: draft.person.sector, village: draft.person.village } } },
+        createdAt: Date.now(),
+      })
+    }
+    await import('./lib/sync').then(({ flushPendingOperations }) => flushPendingOperations()).catch(() => undefined)
+    setIsSaving(false); onSave()
+  }
   if (saved) return <Success title="Bicycle registered" copy="The bicycle and linked owner are saved locally and ready for sync." onDone={onCancel} />
   const steps = ['Serial', 'Bicycle', 'Person', 'Review', 'Done']
   const person = draft.person
@@ -201,20 +460,52 @@ function RegisterScreen({ saved, onSave, onCancel, onViewOwner }: { saved: boole
     {phase === 'serial' && <div className="flow-body"><h2>Verify bicycle serial</h2><p>Check the database before creating a registration. A bicycle serial can only be registered once.</p><label>Frame serial number<div className="serial-input"><QrCode size={16} /><input value={draft.frameNumber} onChange={(event) => { updateBicycle('frameNumber', event.target.value); setSerialChecked(false); setSerialOwner(null); setSerialConfirmed(false) }} placeholder="E.G. ABT-2024-00918" /><Smartphone size={16} /></div></label><button className="secondary-button" onClick={() => void verifySerial()}><Search size={15} /> Check bicycle database</button>{serialChecked && serialOwner && <div className="duplicate-warning"><ShieldAlert size={17} /><span><strong>Serial already registered</strong><small>This bicycle is linked to {serialOwner.name}. Resolve this issue before continuing.</small><button className="owner-details-link" onClick={() => onViewOwner(serialOwner)}>View owner details <ArrowRight size={12} /></button><div className="owner-details"><b>{serialOwner.name}</b><small>{serialOwner.nationalId} · {serialOwner.phone}</small><small>{serialOwner.sector} · {serialOwner.village}</small></div></span>{serialConfirmed ? <Check className="confirmation-check" size={17} /> : <button className="confirm-warning" onClick={() => setSerialConfirmed(true)}>Issue resolved</button>}</div>}{serialChecked && !serialOwner && <div className="verification-result not-found"><Check size={15} /><span><strong>Serial available</strong><small>No bicycle record was found. Continue to capture the bicycle.</small></span></div>}</div>}
     {phase === 'bicycle' && <div className="flow-body"><h2>Record bicycle details</h2><p>This serial is new. Capture the bicycle before linking its current owner.</p><div className="capture-summary"><span>Frame serial<strong>{draft.frameNumber}</strong></span><span className="not-found-label">Available to register</span></div><div className="two-fields"><label>Brand<input value={draft.brand} onChange={(event) => updateBicycle('brand', event.target.value)} placeholder="e.g. Trek" /></label><label>Model<input value={draft.model} onChange={(event) => updateBicycle('model', event.target.value)} placeholder="e.g. Marlin 7" /></label></div><div className="two-fields"><label>Color<input value={draft.color} onChange={(event) => updateBicycle('color', event.target.value)} placeholder="e.g. black" /></label><label>Photo reference<input placeholder="Optional photo ID" /></label></div><label>Distinguishing features<textarea value={draft.features} onChange={(event) => updateBicycle('features', event.target.value)} placeholder="Scratches, markings, accessories" /></label></div>}
     {phase === 'person-search' && <div className="flow-body"><h2>Find current owner</h2><p>Search by name or national ID. National ID is the primary person identifier.</p><label>Name or national ID<div className="search-field"><Search size={15} /><input value={personQuery} onChange={(event) => setPersonQuery(event.target.value)} placeholder="Search person in database" /></div></label><button className="secondary-button" onClick={findPerson}><Search size={15} /> Find person</button>{personChecked && person && <div className="person-found"><Check size={16} /><span><strong>{person.name}</strong><small>{person.nationalId} · {person.phone}</small><small>{person.sector} · {person.village}</small></span></div>}{personChecked && !person && <div className="person-not-found"><UserRound size={16} /><span><strong>Person not found</strong><small>No person matches this search. Add the owner to the database.</small></span><button onClick={() => setPhase('person-new')}>Add new person <ArrowRight size={14} /></button></div>}</div>}
-    {phase === 'person-new' && <div className="flow-body"><h2>Add person to database</h2><p>Create the owner record first, then it will be linked to this bicycle registration.</p><label>Full name<input value={newPerson.name} onChange={(event) => updatePerson('name', event.target.value)} placeholder="Full legal name" /></label><label>National ID (primary key)<input value={newPerson.nationalId} onChange={(event) => updatePerson('nationalId', event.target.value)} placeholder="National ID number" /></label><div className="two-fields"><label>Phone<input value={newPerson.phone} onChange={(event) => updatePerson('phone', event.target.value)} placeholder="Primary phone" /></label><label>Cell<input value={newPerson.cell} onChange={(event) => updatePerson('cell', event.target.value)} placeholder="Cell number" /></label></div><div className="two-fields"><label>Sector<input value={newPerson.sector} onChange={(event) => updatePerson('sector', event.target.value)} placeholder="Sector" /></label><label>Village<input value={newPerson.village} onChange={(event) => updatePerson('village', event.target.value)} placeholder="Village" /></label></div></div>}
+    {phase === 'person-new' && <div className="flow-body"><h2>Add person to database</h2><p>Create the owner record first, then it will be linked to this bicycle registration.</p><label>Full name<input value={newPerson.name} onChange={(event) => updatePerson('name', event.target.value)} placeholder="Full legal name" /></label><label>National ID (16 characters)<input value={newPerson.nationalId} maxLength={16} onChange={(event) => updatePerson('nationalId', event.target.value)} placeholder="Enter 16-character national ID" /></label><div className="two-fields"><label>Phone<input value={newPerson.phone} onChange={(event) => updatePerson('phone', event.target.value)} placeholder="Primary phone" /></label><label>Cell<input value={newPerson.cell} onChange={(event) => updatePerson('cell', event.target.value)} placeholder="Cell number" /></label></div><div className="two-fields"><label>Sector<input value={newPerson.sector} onChange={(event) => updatePerson('sector', event.target.value)} placeholder="Sector" /></label><label>Village<input value={newPerson.village} onChange={(event) => updatePerson('village', event.target.value)} placeholder="Village" /></label></div></div>}
     {phase === 'review' && <div className="flow-body"><h2>Review registration</h2><p>Confirm the bicycle and its linked current owner before saving.</p><div className="review-summary"><span>Bicycle<strong>{draft.brand || 'New'} {draft.model || 'bicycle'} · {draft.frameNumber}</strong></span><span>Owner<strong>{person?.name}</strong></span><span>National ID<strong>{person?.nationalId}</strong></span><span>Location<strong>{person?.sector} · {person?.village}</strong></span></div><div className="audit-note"><ShieldCheck size={15} /> Registration and owner link will be audited.</div></div>}
-    <div className="flow-actions"><button className="quiet-button" onClick={phase === 'serial' ? onCancel : () => setPhase(phase === 'person-new' ? 'person-search' : phase === 'review' ? 'person-search' : phase === 'person-search' ? 'bicycle' : 'serial')}>Back</button><button className="action-button" disabled={(phase === 'serial' && (!serialChecked || (Boolean(serialOwner) && !serialConfirmed))) || (phase === 'person-search' && !person) || (phase === 'person-new' && (!newPerson.name || !newPerson.nationalId)) || isSaving} onClick={() => { if (phase === 'serial') setPhase(serialOwner ? 'person-search' : 'bicycle'); else if (phase === 'bicycle') setPhase('person-search'); else if (phase === 'person-search') setPhase('review'); else if (phase === 'person-new') { setDraft((current) => ({ ...current, person: { id: `person-${newPerson.nationalId}`, ...newPerson } })); setPhase('review') } else void saveRegistration() }}>{isSaving ? 'Saving...' : phase === 'review' ? 'Save registration' : 'Continue'} <ArrowRight size={15} /></button></div>
+    <div className="flow-actions"><button className="quiet-button" onClick={phase === 'serial' ? onCancel : () => setPhase(phase === 'person-new' ? 'person-search' : phase === 'review' ? 'person-search' : phase === 'person-search' ? 'bicycle' : 'serial')}>Back</button><button className="action-button" disabled={(phase === 'serial' && (!serialChecked || (Boolean(serialOwner) && !serialConfirmed))) || (phase === 'person-search' && !person) || (phase === 'person-new' && (!newPerson.name || newPerson.nationalId.length !== 16)) || isSaving} onClick={() => { if (phase === 'serial') setPhase(serialOwner ? 'person-search' : 'bicycle'); else if (phase === 'bicycle') setPhase('person-search'); else if (phase === 'person-search') setPhase('review'); else if (phase === 'person-new') { setDraft((current) => ({ ...current, person: { id: `person-${newPerson.nationalId}`, ...newPerson } })); setPhase('review') } else void saveRegistration() }}>{isSaving ? 'Saving...' : phase === 'review' ? 'Save registration' : 'Continue'} <ArrowRight size={15} /></button></div>
   </section>
 }
 function Success({ title, copy, onDone }: { title: string; copy: string; onDone: () => void }) { return <div className="success-screen"><span><Check size={28} /></span><h2>{title}</h2><p>{copy}</p><button className="action-button" onClick={onDone}>Return to dashboard <Home size={15} /></button></div> }
 
-function SearchScreen({ query, setQuery, onSelect }: { query: string; setQuery: (query: string) => void; onSelect: (record: BicycleRecord) => void }) { const records = mockBicycles.filter((record) => `${record.name} ${record.frameNumber} ${record.owner}`.toLowerCase().includes(query.toLowerCase())); return <section className="search-screen"><div className="search-field"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search Name, Frame, or Brand..." /></div><div className="filter-line"><span>⌕ Quick status filter</span><span>▣ Last 30 days</span></div><div className="segmented"><button>All items</button><button>Flagged</button><button>Verified</button></div><p className="result-count">Results: {records.length} found</p>{records.map((record) => <button className="search-record" key={record.id} onClick={() => onSelect(record)}><span className="record-image"><Bike size={28} /></span><span><strong>{record.name}</strong><small>{record.type} · {record.color}</small><small>⌕ {record.frameNumber}</small><em className={record.status === 'Verified' ? 'verified' : 'flagged'}>{record.status}</em></span><ChevronRight size={16} /></button>)}{records.length === 0 && <p className="empty-state">No local records found.</p>}<p className="cache-note">Offline database showing results from local cache.</p><button className="secondary-button load-button"><Cloud size={14} /> Load more records</button></section> }
+function SearchScreen({ query, setQuery, onSelect }: { query: string; setQuery: (query: string) => void; onSelect: (record: BicycleRecord) => void }) {
+  const [page, setPage] = useState(1)
+  const { data, isLoading: loading } = useQuery({ queryKey: ['bicycles', query, page], queryFn: () => api.listBicycles(query || undefined, page) })
+  const bicycles = data?.data ?? []
+  const toRecord = (b: api.Bicycle): BicycleRecord => ({ id: b.id, frameNumber: b.frameNumber, name: `${b.brand ?? ''} ${b.model ?? ''}`.trim() || b.frameNumber, type: 'Bicycle', color: b.color ?? '—', owner: b.currentOwner?.name ?? '—', location: '—', status: b.status === 'ACTIVE' ? 'Verified' : 'Needs review', date: '' })
+  return <section className="search-screen"><div className="search-field"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search Name, Frame, or Brand..." /></div><div className="filter-line"><span>⌕ Quick status filter</span><span>▣ Last 30 days</span></div><div className="segmented"><button>All items</button><button>Flagged</button><button>Verified</button></div><p className="result-count">Results: {bicycles.length} found</p>{loading && <p className="empty-state">Loading...</p>}{bicycles.map((b) => { const record = toRecord(b); return <button className="search-record" key={b.id} onClick={() => onSelect(record)}><span className="record-image"><Bike size={28} /></span><span><strong>{record.name}</strong><small>{record.type} · {record.color}</small><small>⌕ {record.frameNumber}</small><em className={record.status === 'Verified' ? 'verified' : 'flagged'}>{record.status}</em></span><ChevronRight size={16} /></button>})}{!loading && bicycles.length === 0 && <p className="empty-state">No records found.</p>}<p className="cache-note">Showing live results from server.</p><button className="secondary-button load-button" onClick={() => setPage((p) => p + 1)}><Cloud size={14} /> Load more records</button></section>
+}
 
-function DetailsScreen({ record }: { record: BicycleRecord }) { return <section className="details-screen"><div className="detail-heading"><span><small>Reference ID</small><strong>TX-98422-BK</strong></span><em className="verified">◉ Verified</em></div><p className="detail-date"><CalendarDays size={13} /> Oct 24, 2023 | 14:32</p><div className="asset-card"><div className="asset-image"><Bike size={52} /><span>Bicycle asset</span></div><div><small>Frame serial number</small><strong>{record.frameNumber}</strong></div><div><small>Frame color</small><strong>{record.color}</strong></div></div><div className="parties-card"><h2><ArrowRight size={15} /> Transfer parties</h2><div><small>Seller (outbound)</small><strong>Marcus Thorne</strong><span>ID-55091-MT</span></div><div><small>Buyer (inbound)</small><strong>Sarah Jenkins</strong><span>ID-99281-SJ</span></div></div><div className="location-card"><MapPin size={17} /><span><small>Field location</small><strong>Field Sector 7 - Portland Central</strong><small>Duty agent</small><strong>AGENT_8821</strong></span></div><button className="action-button export-button"><Send size={14} /> Export certified record (PDF)</button></section> }
+function DetailsScreen({ record }: { record: BicycleRecord }) {
+  const { data: bikeData, isLoading } = useQuery({ queryKey: ['bicycle', record.id], queryFn: () => api.getBicycle(record.id) })
+  const { data: txData } = useQuery({ queryKey: ['transactions', record.frameNumber], queryFn: () => api.listTransactions({ q: record.frameNumber }), enabled: !!record.id })
+  const { data: regData } = useQuery({ queryKey: ['registrations', record.id], queryFn: () => api.listRegistrations({ bicycleId: record.id }), enabled: !!record.id })
+  const bike = bikeData?.data
+  const lastTx = txData?.data?.[0]
+  const registration = regData?.data?.[0]
+  return <section className="details-screen">
+    <div className="detail-heading"><span><small>Frame serial</small><strong>{record.frameNumber}</strong></span><em className={record.status === 'Verified' ? 'verified' : 'flagged'}>◉ {record.status}</em></div>
+    {isLoading && <p className="empty-state">Loading...</p>}
+    <div className="asset-card"><div className="asset-image"><Bike size={52} /><span>Bicycle asset</span></div><div><small>Brand / Model</small><strong>{bike?.brand ?? '—'} {bike?.model ?? ''}</strong></div><div><small>Frame color</small><strong>{bike?.color ?? record.color}</strong></div><div><small>Current owner</small><strong>{bike?.currentOwner?.name ?? record.owner}</strong></div></div>
+    {lastTx && <><p className="detail-date"><CalendarDays size={13} /> {new Date(lastTx.transactionDate).toLocaleString()}</p><div className="parties-card"><h2><ArrowRight size={15} /> Last transaction · {lastTx.transactionId}</h2><div><small>Seller (outbound)</small><strong>{lastTx.seller?.name ?? '—'}</strong></div><div><small>Buyer (inbound)</small><strong>{lastTx.buyer?.name ?? '—'}</strong></div><div><small>Recorded by</small><strong>{lastTx.recordingAgent.name}</strong></div></div></> }
+    {!lastTx && registration && <><p className="detail-date"><CalendarDays size={13} /> Registered {new Date(registration.createdAt).toLocaleString()}</p><div className="parties-card"><h2><Bike size={15} /> Registration record</h2><div><small>Owner</small><strong>{registration.owner.name}</strong></div><div><small>National ID</small><strong>{registration.owner.nationalId}</strong></div><div><small>Recorded by</small><strong>{registration.recordingAgent.name}</strong></div></div></> }
+    <div className="location-card"><MapPin size={17} /><span><small>Status</small><strong>{bike?.status ?? '—'}</strong></span></div>
+    <button className="action-button export-button"><Send size={14} /> Export certified record (PDF)</button>
+  </section>
+}
 
-function ActivityScreen() { return <section className="activity-screen"><p className="date-divider">▣ Friday, Nov 24</p>{mockActivity.concat([['06:20 PM', 'New registration: Giant', 'Owner: Elena Rodriguez']]).map(([time, title, detail]) => <div className="activity-card" key={`${time}-${title}`}><span className="activity-mark"><ArrowRight size={16} /></span><span><strong>{title}</strong><small>{detail}</small><small># TXN-99285-A - {time}</small></span><ChevronRight size={16} /></div>)}</section> }
+function ActivityScreen({ onOpenDetails, onSelectTransaction }: { onOpenDetails: (id: string, frameNumber: string) => void; onSelectTransaction: (id: string) => void }) {
+  const { data: txData, isLoading: txLoading } = useQuery({ queryKey: ['transactions', '', undefined, 1], queryFn: () => api.listTransactions({ page: 1 }) })
+  const { data: regData, isLoading: regLoading } = useQuery({ queryKey: ['registrations', 1], queryFn: () => api.listRegistrations({ page: 1 }) })
+  const loading = txLoading || regLoading
+  type ActivityItem = { key: string; date: string; label: string; sub1: string; sub2: string; onPress: () => void }
+  const items: ActivityItem[] = [
+    ...(txData?.data ?? []).map((t) => ({ key: t.id, date: t.transactionDate, label: `${t.type === 'SALE' ? 'Sale' : 'Transfer'}: ${t.bicycle.brand ?? ''} ${t.bicycle.model ?? ''}`.trim(), sub1: `${t.seller?.name ?? '—'} → ${t.buyer?.name ?? '—'}`, sub2: `# ${t.transactionId} · ${new Date(t.transactionDate).toLocaleString()}`, onPress: () => onSelectTransaction(t.id) })),
+    ...(regData?.data ?? []).map((r) => ({ key: r.id, date: r.createdAt, label: `Registered: ${r.bicycle.brand ?? ''} ${r.bicycle.model ?? ''}`.trim(), sub1: `Owner: ${r.owner.name}`, sub2: `# ${r.bicycle.frameNumber} · ${new Date(r.createdAt).toLocaleString()}`, onPress: () => onOpenDetails(r.bicycle.id, r.bicycle.frameNumber) })),
+  ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+  return <section className="activity-screen"><p className="date-divider">▣ Recent Activity</p>{loading && <p className="empty-state">Loading...</p>}{items.map((item) => <button className="activity-card" key={item.key} onClick={item.onPress}><span className="activity-mark"><ArrowRight size={16} /></span><span><strong>{item.label}</strong><small>{item.sub1}</small><small>{item.sub2}</small></span><ChevronRight size={16} /></button>)}{!loading && items.length === 0 && <p className="empty-state">No recent activity.</p>}</section>
+}
 
-function ProfileScreen({ onWarning, onLogout, onAdmin }: { onWarning: () => void; onLogout: () => void; onAdmin: () => void }) { return <section className="profile-screen"><div className="profile-card"><span className="profile-avatar">MO</span><span><strong>{mockUser.name}</strong><small>Field Agent · {mockUser.location}</small></span><ChevronRight size={16} /></div><button className="settings-row"><Settings size={17} /> Field preferences <span>Unit 88 configuration</span><ChevronRight size={15} /></button><button className="settings-row"><FileText size={17} /> Agent handbook <span>v4.2.0-stable</span><ChevronRight size={15} /></button><button className="warning-row" onClick={onWarning}><ShieldAlert size={17} /> View protocol warning <ChevronRight size={15} /></button><button className="settings-row" onClick={onAdmin}><ShieldCheck size={17} /> Admin workspace preview <span>Admin</span><ChevronRight size={15} /></button><button className="logout-button" onClick={onLogout}>End session & secure logs <LockKeyhole size={15} /></button><p className="profile-footnote">Logging out will clear temporary field caches and lock the encrypted layer.</p></section> }
+function ProfileScreen({ user, onWarning, onLogout, onAdmin }: { user: { id: string; name: string; role: Role } | null; onWarning: () => void; onLogout: () => void; onAdmin: () => void }) { const initials = user ? user.name.split(' ').map((p) => p[0]).join('').slice(0, 2).toUpperCase() : 'MO'; return <section className="profile-screen"><div className="profile-card"><span className="profile-avatar">{initials}</span><span><strong>{user?.name ?? mockUser.name}</strong><small>Field Agent · {mockUser.location}</small></span><ChevronRight size={16} /></div><button className="settings-row"><Settings size={17} /> Field preferences <span>Unit 88 configuration</span><ChevronRight size={15} /></button><button className="settings-row"><FileText size={17} /> Agent handbook <span>v4.2.0-stable</span><ChevronRight size={15} /></button><button className="warning-row" onClick={onWarning}><ShieldAlert size={17} /> View protocol warning <ChevronRight size={15} /></button><button className="settings-row" onClick={onAdmin}><ShieldCheck size={17} /> Admin workspace preview <span>Admin</span><ChevronRight size={15} /></button><button className="logout-button" onClick={onLogout}>End session &amp; secure logs <LockKeyhole size={15} /></button><p className="profile-footnote">Logging out will clear temporary field caches and lock the encrypted layer.</p></section> }
 function BottomNav({ screen, onNavigate }: { screen: Screen; onNavigate: (screen: Screen) => void }) { return <nav className="bottom-nav">{navItems.map(({ screen: item, label, icon: Icon }) => <button className={screen === item ? 'active' : ''} key={item} onClick={() => onNavigate(item)}><Icon size={18} /><small>{label}</small></button>)}</nav> }
 function AdminBottomNav({ screen, onNavigate }: { screen: Screen; onNavigate: (screen: Screen) => void }) { const items: { screen: Screen; label: string; icon: typeof Home }[] = [{ screen: 'admin-home', label: 'Home', icon: Home }, { screen: 'bicycle-inventory', label: 'Bicycles', icon: Bike }, { screen: 'registry-profile', label: 'People', icon: Users }, { screen: 'agent-management', label: 'Agents', icon: UserRound }]; return <nav className="bottom-nav admin-bottom-nav">{items.map(({ screen: item, label, icon: Icon }) => <button className={screen === item || (label === 'Bicycles' && ['admin-transactions', 'transaction-record', 'flagged-queue', 'ownership-chain'].includes(screen)) || (label === 'Agents' && ['agent-onboarding', 'agent-terminal'].includes(screen)) ? 'active' : ''} key={label} onClick={() => onNavigate(item)}><Icon size={18} /><small>{label}</small></button>)}</nav> }
 function OwnerDetailsModal({ person, onClose }: { person: PersonRecord; onClose: () => void }) { return <div className="owner-modal-backdrop" role="dialog" aria-modal="true" aria-label="Owner details"><section className="owner-modal"><header><span><UserRound size={17} /> Owner details</span><button onClick={onClose} aria-label="Close owner details"><X size={18} /></button></header><div className="owner-modal-identity"><span className="profile-avatar">{person.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><strong>{person.name}</strong><small>Existing person record</small></span></div><dl><dt>National ID</dt><dd>{person.nationalId}</dd><dt>Phone</dt><dd>{person.phone}</dd><dt>Cell</dt><dd>{person.cell}</dd><dt>Sector</dt><dd>{person.sector}</dd><dt>Village</dt><dd>{person.village}</dd></dl><p className="owner-modal-note"><ShieldCheck size={14} /> This person can be linked without creating a duplicate record.</p><button className="action-button" onClick={onClose}>Return to verification</button></section></div> }

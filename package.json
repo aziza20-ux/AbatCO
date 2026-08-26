@@ -17,6 +17,7 @@
     "prisma:generate": "prisma generate",
     "prisma:validate": "prisma validate",
     "prisma:migrate": "prisma migrate dev",
+    "db:seed": "tsx prisma/seed.ts",
     "test": "npm --workspace @abatco/api run test"
   },
   "devDependencies": {
@@ -30,6 +31,9 @@
     "prettier": "^3.6.0",
     "typescript": "^5.9.0",
     "typescript-eslint": "^8.41.0"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.15.0",

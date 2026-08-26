@@ -10,6 +10,9 @@ import { transactionsRouter } from './routes/transactions.js'
 import { registrationsRouter } from './routes/registrations.js'
 import { adminRouter } from './routes/admin.js'
 import { syncRouter } from './routes/sync.js'
+import { exportsRouter } from './routes/exports.js'
+import { uploadsRouter } from './routes/uploads.js'
+import { auditRouter } from './routes/audit.js'
 
 export const app = express()
 const allowedOrigins = [process.env.WEB_ORIGIN, process.env.APP_ORIGIN].filter((origin): origin is string => Boolean(origin))
@@ -24,6 +27,9 @@ app.use('/api/transactions', transactionsRouter)
 app.use('/api/registrations', registrationsRouter)
 app.use('/api/admin', adminRouter)
 app.use('/api/sync', syncRouter)
+app.use('/api/exports', exportsRouter)
+app.use('/api/uploads', uploadsRouter)
+app.use('/api/audit', auditRouter)
 
 const errorHandler: ErrorRequestHandler = (error, _request, response, _next) => {
   if (error?.name === 'ZodError') return response.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid request', details: error.issues } })

@@ -4,4 +4,5 @@ import { registrationHandlers } from '../controllers/registrationsController.js'
 
 export const registrationsRouter = Router()
 registrationsRouter.use(requireAuth)
+registrationsRouter.get('/', registrationHandlers.listRegistrations)
 registrationsRouter.post('/', registrationHandlers.createRegistration)
