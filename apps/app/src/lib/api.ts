@@ -50,7 +50,7 @@ export async function logout() {
 export type Person = { id: string; name: string; nationalId: string; phone?: string; cell?: string; address?: string; sector?: string; village?: string }
 
 export async function listPeople(q?: string, page = 1) {
-  const params = new URLSearchParams({ page: String(page), limit: '20', ...(q ? { q } : {}) })
+  const params = new URLSearchParams({ page: String(page), limit: '5', ...(q ? { q } : {}) })
   return apiRequest<ApiEnvelope<Person[]>>(`/people?${params}`)
 }
 
@@ -70,8 +70,8 @@ export async function updatePerson(id: string, data: Partial<Omit<Person, 'id'>>
 
 export type Bicycle = { id: string; frameNumber: string; brand?: string; model?: string; color?: string; distinguishingFeatures?: string; photos: string[]; currentOwnerId?: string; currentOwner?: Person; status: string }
 
-export async function listBicycles(q?: string, page = 1) {
-  const params = new URLSearchParams({ page: String(page), limit: '20', ...(q ? { q } : {}) })
+export async function listBicycles(q?: string, page = 1, from?: string, to?: string) {
+  const params = new URLSearchParams({ page: String(page), limit: '5', ...(q ? { q } : {}), ...(from ? { from } : {}), ...(to ? { to } : {}) })
   return apiRequest<ApiEnvelope<Bicycle[]>>(`/bicycles?${params}`)
 }
 
@@ -105,8 +105,8 @@ export async function updateBicycle(id: string, data: { brand?: string; model?: 
 
 export type Transaction = { id: string; transactionId: string; type: 'SALE' | 'TRANSFER'; price?: number; serviceFee?: number; reason?: string; location?: string; transactionDate: string; flagStatus: string; flagReason?: string; agentNote?: string; adminReviewNotes?: string; bicycle: { id: string; frameNumber: string; brand?: string; model?: string }; seller?: { id: string; name: string }; buyer?: { id: string; name: string }; recordingAgent: { id: string; name: string } }
 
-export async function listTransactions(params?: { q?: string; flagStatus?: string; agentId?: string; page?: number }) {
-  const search = new URLSearchParams({ page: String(params?.page ?? 1), limit: '20', ...(params?.q ? { q: params.q } : {}), ...(params?.flagStatus ? { flagStatus: params.flagStatus } : {}), ...(params?.agentId ? { agentId: params.agentId } : {}) })
+export async function listTransactions(params?: { q?: string; flagStatus?: string; agentId?: string; personId?: string; page?: number }) {
+  const search = new URLSearchParams({ page: String(params?.page ?? 1), limit: '5', ...(params?.q ? { q: params.q } : {}), ...(params?.flagStatus ? { flagStatus: params.flagStatus } : {}), ...(params?.agentId ? { agentId: params.agentId } : {}), ...(params?.personId ? { personId: params.personId } : {}) })
   return apiRequest<ApiEnvelope<Transaction[]>>(`/transactions?${search}`)
 }
 
@@ -127,7 +127,7 @@ export async function editTransaction(id: string, data: object) {
 export type Registration = { id: string; bicycleId: string; ownerId: string; createdAt: string; bicycle: { id: string; frameNumber: string; brand?: string; model?: string }; owner: { id: string; name: string; nationalId: string }; recordingAgent: { id: string; name: string } }
 
 export async function listRegistrations(params?: { bicycleId?: string; ownerId?: string; page?: number }) {
-  const search = new URLSearchParams({ page: String(params?.page ?? 1), limit: '20', ...(params?.bicycleId ? { bicycleId: params.bicycleId } : {}), ...(params?.ownerId ? { ownerId: params.ownerId } : {}) })
+  const search = new URLSearchParams({ page: String(params?.page ?? 1), limit: '5', ...(params?.bicycleId ? { bicycleId: params.bicycleId } : {}), ...(params?.ownerId ? { ownerId: params.ownerId } : {}) })
   return apiRequest<ApiEnvelope<Registration[]>>(`/registrations?${search}`)
 }
 

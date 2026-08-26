@@ -1,19 +1,19 @@
 import { useState, useEffect, type ReactNode } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from '@tanstack/react-query'
 import { Activity, ArrowLeft, ArrowRight, Bike, CalendarDays, Check, ChevronRight, Cloud, Database, Eye, FileText, Flag, Home, LockKeyhole, MapPin, Plus, QrCode, Search, Send, Settings, ShieldAlert, ShieldCheck, Signal, Smartphone, Trash2, TrendingUp, UserRound, Users, Wifi, X } from 'lucide-react'
 import { type BicycleRecord, type PersonRecord, mockUser } from './mock/data'
 import { db } from './lib/db'
 import * as api from './lib/api'
 import { startSyncWorker } from './lib/sync'
 
-type Screen = 'login' | 'home' | 'admin-home' | 'admin-transactions' | 'transaction-record' | 'flagged-queue' | 'bicycle-inventory' | 'ownership-chain' | 'registry-profile' | 'agent-management' | 'agent-onboarding' | 'agent-terminal' | 'reports-exports' | 'transaction' | 'register' | 'search' | 'details' | 'activity' | 'profile'
+type Screen = 'login' | 'home' | 'admin-home' | 'admin-transactions' | 'transaction-record' | 'flagged-queue' | 'bicycle-inventory' | 'ownership-chain' | 'registry-profile' | 'agent-management' | 'agent-onboarding' | 'agent-terminal' | 'reports-exports' | 'transaction' | 'register' | 'search' | 'details' | 'activity' | 'profile' | 'people' | 'person-activity'
 type Role = 'AGENT' | 'ADMIN'
 
 const navItems: { screen: Screen; label: string; icon: typeof Home }[] = [
   { screen: 'home', label: 'Home', icon: Home },
   { screen: 'search', label: 'Search', icon: Search },
   { screen: 'activity', label: 'Activity', icon: Activity },
-  { screen: 'profile', label: 'Profile', icon: UserRound },
+  { screen: 'people', label: 'People', icon: Users },
 ]
 
 export default function App() {
@@ -30,6 +30,28 @@ export default function App() {
   const [warning, setWarning] = useState(false)
   const [ownerDetails, setOwnerDetails] = useState<PersonRecord | null>(null)
   const [selectedAgent, setSelectedAgent] = useState<api.Agent | null>(null)
+  const [selectedPerson, setSelectedPerson] = useState<api.Person | null>(null)
+  const [showProfile, setShowProfile] = useState(false)
+  const [pendingCount, setPendingCount] = useState(0)
+  const [isOnline, setIsOnline] = useState(navigator.onLine)
+  const refreshPending = () =>
+    Promise.all([
+      db.pendingTransactions.toArray(),
+      db.pendingRegistrations.toArray(),
+      db.syncMetadata.toArray(),
+    ]).then(([txs, regs, meta]) => {
+      const blockedIds = new Set(meta.map((m) => m.key.replace(/^(conflict|error):/, '')))
+      const count = [...txs, ...regs].filter((r) => !blockedIds.has(r.id)).length
+      setPendingCount(count)
+    })
+  useEffect(() => {
+    refreshPending()
+    const interval = setInterval(refreshPending, 3000)
+    const on = () => { setIsOnline(true); refreshPending() }
+    const off = () => { setIsOnline(false); refreshPending() }
+    window.addEventListener('online', on); window.addEventListener('offline', off)
+    return () => { clearInterval(interval); window.removeEventListener('online', on); window.removeEventListener('offline', off) }
+  }, [])
 
   useEffect(() => {
     if (screen !== 'login') return startSyncWorker()
@@ -47,12 +69,15 @@ export default function App() {
 
   return <div className="terminal-shell">
     <header className="terminal-header">
-      {screen !== 'home' && screen !== 'admin-home' && <button className="back-button" onClick={() => go(screen === 'details' ? detailsOrigin : screen === 'transaction-record' ? transactionOrigin : role === 'ADMIN' ? 'admin-home' : 'home')} aria-label="Go back"><ArrowLeft size={17} /></button>}
+      {screen !== 'home' && screen !== 'admin-home' && <button className="back-button" onClick={() => go(screen === 'details' ? detailsOrigin : screen === 'transaction-record' ? transactionOrigin : screen === 'person-activity' ? 'people' : role === 'ADMIN' ? 'admin-home' : 'home')} aria-label="Go back"><ArrowLeft size={17} /></button>}
       <strong>{screenTitle(screen)}</strong>
-      <span className="wifi-badge" title="Online"><Wifi size={14} /></span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span className="wifi-badge" title="Online"><Wifi size={14} /></span>
+        <button className="settings-icon-btn" onClick={() => setShowProfile(true)} aria-label="Profile settings"><Settings size={16} /></button>
+      </div>
     </header>
     <div className="terminal-content">
-      {screen === 'home' && <HomeScreen onNavigate={go} onSelect={openDetails} />}
+      {screen === 'home' && <HomeScreen onNavigate={go} onSelect={openDetails} pendingCount={pendingCount} isOnline={isOnline} />}
       {screen === 'admin-home' && <AdminHomeScreen onNavigate={go} />}
       {screen === 'admin-transactions' && <AdminTransactionsScreen onNavigate={go} onSelectTransaction={(id) => { setSelectedTransactionId(id); setTransactionOrigin('admin-transactions') }} />}
       {screen === 'transaction-record' && <AdminRecordScreen transactionId={selectedTransactionId} onNavigate={go} />}
@@ -64,21 +89,23 @@ export default function App() {
       {screen === 'agent-onboarding' && <AgentOnboardingScreen onNavigate={(s) => { if (s !== 'agent-onboarding') setSelectedAgent(null); go(s) }} />}
       {screen === 'agent-terminal' && <AgentTerminalScreen agent={selectedAgent} onNavigate={go} />}
       {screen === 'reports-exports' && <ReportsExportsScreen onNavigate={go} />}
-      {screen === 'transaction' && <TransactionFlow step={transactionStep} setStep={setTransactionStep} saved={saved} onSave={() => setSaved(true)} onCancel={() => go('home')} onViewOwner={setOwnerDetails} />}
-      {screen === 'register' && <RegisterScreen onSave={() => setSaved(true)} saved={saved} onCancel={() => go('home')} onViewOwner={setOwnerDetails} />}
+      {screen === 'transaction' && <TransactionFlow step={transactionStep} setStep={setTransactionStep} saved={saved} onSave={() => { setSaved(true); refreshPending() }} onCancel={() => go('home')} onViewOwner={setOwnerDetails} />}
+      {screen === 'register' && <RegisterScreen onSave={() => { setSaved(true); refreshPending() }} saved={saved} onCancel={() => go('home')} onViewOwner={setOwnerDetails} />}
       {screen === 'search' && <SearchScreen query={query} setQuery={setQuery} onSelect={openDetails} />}
       {screen === 'details' && selected && <DetailsScreen record={selected} />}
       {screen === 'activity' && <ActivityScreen onOpenDetails={openDetailsById} onSelectTransaction={(id) => { setSelectedTransactionId(id); setTransactionOrigin('activity'); go('transaction-record') }} />}
-      {screen === 'profile' && <ProfileScreen user={currentUser} onWarning={() => setWarning(true)} onLogout={async () => { await api.logout().catch(() => undefined); setCurrentUser(null); setRole('AGENT'); go('login') }} onAdmin={() => { setRole('ADMIN'); go('admin-home') }} />}
+      {screen === 'people' && <PeopleScreen onSelectPerson={(p) => { setSelectedPerson(p); go('person-activity') }} />}
+      {screen === 'person-activity' && <PersonActivityScreen person={selectedPerson} onSelectTransaction={(id) => { setSelectedTransactionId(id); setTransactionOrigin('person-activity'); go('transaction-record') }} onOpenDetails={openDetailsById} />}
     </div>
-    {role === 'ADMIN' ? <AdminBottomNav screen={screen} onNavigate={go} /> : screen !== 'transaction' && screen !== 'register' && screen !== 'details' && <BottomNav screen={screen} onNavigate={go} />}
+    {role === 'ADMIN' ? <AdminBottomNav screen={screen} onNavigate={go} /> : screen !== 'transaction' && screen !== 'register' && screen !== 'details' && screen !== 'person-activity' && <BottomNav screen={screen} onNavigate={go} />}
     {warning && <WarningModal onClose={() => setWarning(false)} />}
     {ownerDetails && <OwnerDetailsModal person={ownerDetails} onClose={() => setOwnerDetails(null)} />}
+    {showProfile && <ProfileModal user={currentUser} onWarning={() => { setShowProfile(false); setWarning(true) }} onLogout={async () => { setShowProfile(false); await api.logout().catch(() => undefined); setCurrentUser(null); setRole('AGENT'); go('login') }} onAdmin={() => { setShowProfile(false); setRole('ADMIN'); go('admin-home') }} onClose={() => setShowProfile(false)} />}
   </div>
 }
 
 function screenTitle(screen: Screen) {
-  return { home: 'Agent Dashboard', 'admin-home': 'Biketrack Admin', 'admin-transactions': 'All Transactions', 'transaction-record': 'Transaction Record', 'flagged-queue': 'Flagged Queue', 'bicycle-inventory': 'Bicycle Inventory', 'ownership-chain': 'Ownership Chain', 'registry-profile': 'Registry Profile', 'agent-management': 'Field Agent Management', 'agent-onboarding': 'Agent Onboarding', 'agent-terminal': 'Agent Terminal', 'reports-exports': 'Reports & Exports', transaction: 'New Transaction', register: 'Register Bicycle', search: 'Search Field Records', details: 'Transaction Details', activity: 'Recent Activity', profile: 'Agent Profile & Settings', login: 'Login' }[screen]
+  return { home: 'Agent Dashboard', 'admin-home': 'Biketrack Admin', 'admin-transactions': 'All Transactions', 'transaction-record': 'Transaction Record', 'flagged-queue': 'Flagged Queue', 'bicycle-inventory': 'Bicycle Inventory', 'ownership-chain': 'Ownership Chain', 'registry-profile': 'Registry Profile', 'agent-management': 'Field Agent Management', 'agent-onboarding': 'Agent Onboarding', 'agent-terminal': 'Agent Terminal', 'reports-exports': 'Reports & Exports', transaction: 'New Transaction', register: 'Register Bicycle', search: 'Search Field Records', details: 'Record Details', activity: 'Recent Activity', profile: 'Agent Profile & Settings', people: 'People Registry', 'person-activity': 'Person Activity', login: 'Login' }[screen]
 }
 
 function Login({ onLogin }: { onLogin: (user: { id: string; name: string; role: Role }) => void }) {
@@ -105,28 +132,8 @@ function Login({ onLogin }: { onLogin: (user: { id: string; name: string; role: 
   </main>
 }
 
-function HomeScreen({ onNavigate, onSelect }: { onNavigate: (screen: Screen) => void; onSelect: (record: BicycleRecord) => void }) {
+function HomeScreen({ onNavigate, onSelect, pendingCount, isOnline }: { onNavigate: (screen: Screen) => void; onSelect: (record: BicycleRecord) => void; pendingCount: number; isOnline: boolean }) {
   const { data: recentData } = useQuery({ queryKey: ['bicycles', '', 1], queryFn: () => api.listBicycles(undefined, 1) })
-  const [pendingCount, setPendingCount] = useState(0)
-  const [isOnline, setIsOnline] = useState(navigator.onLine)
-  const refreshPending = () =>
-    Promise.all([
-      db.pendingTransactions.toArray(),
-      db.pendingRegistrations.toArray(),
-      db.syncMetadata.toArray(),
-    ]).then(([txs, regs, meta]) => {
-      const blockedIds = new Set(meta.map((m) => m.key.replace(/^(conflict|error):/, '')))
-      const count = [...txs, ...regs].filter((r) => !blockedIds.has(r.id)).length
-      setPendingCount(count)
-    })
-  useEffect(() => {
-    refreshPending()
-    const interval = setInterval(refreshPending, 5000)
-    const on = () => { setIsOnline(true); refreshPending() }
-    const off = () => setIsOnline(false)
-    window.addEventListener('online', on); window.addEventListener('offline', off)
-    return () => { clearInterval(interval); window.removeEventListener('online', on); window.removeEventListener('offline', off) }
-  }, [])
   const recentBike = recentData?.data[0] ?? null
   const recentRecord: BicycleRecord | null = recentBike ? { id: recentBike.id, frameNumber: recentBike.frameNumber, name: `${recentBike.brand ?? ''} ${recentBike.model ?? ''}`.trim() || recentBike.frameNumber, type: 'Bicycle', color: recentBike.color ?? '—', owner: recentBike.currentOwner?.name ?? '—', location: '—', status: recentBike.status === 'ACTIVE' ? 'Verified' : 'Needs review', date: '' } : null
   return <>
@@ -468,11 +475,36 @@ function RegisterScreen({ saved, onSave, onCancel, onViewOwner }: { saved: boole
 function Success({ title, copy, onDone }: { title: string; copy: string; onDone: () => void }) { return <div className="success-screen"><span><Check size={28} /></span><h2>{title}</h2><p>{copy}</p><button className="action-button" onClick={onDone}>Return to dashboard <Home size={15} /></button></div> }
 
 function SearchScreen({ query, setQuery, onSelect }: { query: string; setQuery: (query: string) => void; onSelect: (record: BicycleRecord) => void }) {
-  const [page, setPage] = useState(1)
-  const { data, isLoading: loading } = useQuery({ queryKey: ['bicycles', query, page], queryFn: () => api.listBicycles(query || undefined, page) })
-  const bicycles = data?.data ?? []
+  type DateFilter = 'last30' | 'specific' | 'range' | 'all'
+  const [dateFilter, setDateFilter] = useState<DateFilter>('last30')
+  const [specificDate, setSpecificDate] = useState('')
+  const [rangeFrom, setRangeFrom] = useState('')
+  const [rangeTo, setRangeTo] = useState('')
+  const { from, to } = (() => {
+    if (dateFilter === 'last30') { const d = new Date(); d.setDate(d.getDate() - 30); return { from: d.toISOString(), to: undefined } }
+    if (dateFilter === 'specific' && specificDate) { const d = new Date(specificDate); const next = new Date(d); next.setDate(d.getDate() + 1); return { from: d.toISOString(), to: next.toISOString() } }
+    if (dateFilter === 'range') return { from: rangeFrom ? new Date(rangeFrom).toISOString() : undefined, to: rangeTo ? new Date(rangeTo).toISOString() : undefined }
+    return { from: undefined, to: undefined }
+  })()
+  const { data, isLoading, isFetchingNextPage, fetchNextPage, hasNextPage } = useInfiniteQuery({
+    queryKey: ['bicycles', query, dateFilter, specificDate, rangeFrom, rangeTo],
+    queryFn: ({ pageParam = 1 }) => api.listBicycles(query || undefined, pageParam as number, from, to),
+    getNextPageParam: (lastPage, pages) => lastPage.data.length >= 5 ? pages.length + 1 : undefined,
+    initialPageParam: 1,
+  })
+  const bicycles = data?.pages.flatMap((p) => p.data) ?? []
   const toRecord = (b: api.Bicycle): BicycleRecord => ({ id: b.id, frameNumber: b.frameNumber, name: `${b.brand ?? ''} ${b.model ?? ''}`.trim() || b.frameNumber, type: 'Bicycle', color: b.color ?? '—', owner: b.currentOwner?.name ?? '—', location: '—', status: b.status === 'ACTIVE' ? 'Verified' : 'Needs review', date: '' })
-  return <section className="search-screen"><div className="search-field"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search Name, Frame, or Brand..." /></div><div className="filter-line"><span>⌕ Quick status filter</span><span>▣ Last 30 days</span></div><div className="segmented"><button>All items</button><button>Flagged</button><button>Verified</button></div><p className="result-count">Results: {bicycles.length} found</p>{loading && <p className="empty-state">Loading...</p>}{bicycles.map((b) => { const record = toRecord(b); return <button className="search-record" key={b.id} onClick={() => onSelect(record)}><span className="record-image"><Bike size={28} /></span><span><strong>{record.name}</strong><small>{record.type} · {record.color}</small><small>⌕ {record.frameNumber}</small><em className={record.status === 'Verified' ? 'verified' : 'flagged'}>{record.status}</em></span><ChevronRight size={16} /></button>})}{!loading && bicycles.length === 0 && <p className="empty-state">No records found.</p>}<p className="cache-note">Showing live results from server.</p><button className="secondary-button load-button" onClick={() => setPage((p) => p + 1)}><Cloud size={14} /> Load more records</button></section>
+  return <section className="search-screen">
+    <div className="search-field"><Search size={16} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search Name, Frame, or Brand..." /></div>
+    <div className="admin-filters">{(['last30', 'specific', 'range', 'all'] as DateFilter[]).map((f) => <button key={f} className={dateFilter === f ? 'selected' : ''} onClick={() => setDateFilter(f)}>{f === 'last30' ? 'Last 30 days' : f === 'specific' ? 'Specific date' : f === 'range' ? 'Date range' : 'All time'}</button>)}</div>
+    {dateFilter === 'specific' && <div className="date-inputs"><input type="date" value={specificDate} onChange={(e) => setSpecificDate(e.target.value)} /></div>}
+    {dateFilter === 'range' && <div className="date-inputs"><input type="date" value={rangeFrom} onChange={(e) => setRangeFrom(e.target.value)} /><input type="date" value={rangeTo} onChange={(e) => setRangeTo(e.target.value)} /></div>}
+    <p className="result-count">Results: {bicycles.length} found</p>
+    {isLoading && <p className="empty-state">Loading...</p>}
+    {bicycles.map((b) => { const record = toRecord(b); return <button className="search-record" key={b.id} onClick={() => onSelect(record)}><span className="record-image"><Bike size={28} /></span><span><strong>{record.name}</strong><small>{record.type} · {record.color}</small><small>⌕ {record.frameNumber}</small><em className={record.status === 'Verified' ? 'verified' : 'flagged'}>{record.status}</em></span><ChevronRight size={16} /></button>})}
+    {!isLoading && bicycles.length === 0 && <p className="empty-state">No records found.</p>}
+    {hasNextPage && <button className="secondary-button load-button" disabled={isFetchingNextPage} onClick={() => void fetchNextPage()}><Cloud size={14} /> {isFetchingNextPage ? 'Loading...' : 'Load more'}</button>}
+  </section>
 }
 
 function DetailsScreen({ record }: { record: BicycleRecord }) {
@@ -494,18 +526,96 @@ function DetailsScreen({ record }: { record: BicycleRecord }) {
 }
 
 function ActivityScreen({ onOpenDetails, onSelectTransaction }: { onOpenDetails: (id: string, frameNumber: string) => void; onSelectTransaction: (id: string) => void }) {
-  const { data: txData, isLoading: txLoading } = useQuery({ queryKey: ['transactions', '', undefined, 1], queryFn: () => api.listTransactions({ page: 1 }) })
-  const { data: regData, isLoading: regLoading } = useQuery({ queryKey: ['registrations', 1], queryFn: () => api.listRegistrations({ page: 1 }) })
+  const [isOnline, setIsOnline] = useState(navigator.onLine)
+  const [offlineItems, setOfflineItems] = useState<{ key: string; date: number; label: string; sub1: string }[]>([])
+  useEffect(() => {
+    const on = () => setIsOnline(true)
+    const off = () => setIsOnline(false)
+    window.addEventListener('online', on); window.addEventListener('offline', off)
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off) }
+  }, [])
+  useEffect(() => {
+    if (isOnline) return
+    Promise.all([db.pendingTransactions.orderBy('createdAt').reverse().toArray(), db.pendingRegistrations.orderBy('createdAt').reverse().toArray()]).then(([txs, regs]) => {
+      setOfflineItems([
+        ...txs.map((r) => { const p = r.payload as { type?: string; _raw?: { type?: string; bicycle?: { frameNumber?: string } } }; const type = p._raw?.type ?? p.type ?? 'TRANSACTION'; const frame = (p as { frameNumber?: string }).frameNumber ?? p._raw?.bicycle?.frameNumber ?? '—'; return { key: r.id, date: r.createdAt, label: `Pending ${type}: ${frame}`, sub1: 'Queued offline — awaiting sync' } }),
+        ...regs.map((r) => { const p = r.payload as { _raw?: { bicycle?: { frameNumber?: string } }; bicycleId?: string }; const frame = p._raw?.bicycle?.frameNumber ?? p.bicycleId ?? '—'; return { key: r.id, date: r.createdAt, label: `Pending registration: ${frame}`, sub1: 'Queued offline — awaiting sync' } }),
+      ].sort((a, b) => b.date - a.date))
+    })
+  }, [isOnline])
+  const { data: txData, isLoading: txLoading, fetchNextPage: txNext, hasNextPage: txHasMore, isFetchingNextPage: txFetching } = useInfiniteQuery({ queryKey: ['transactions-activity'], queryFn: ({ pageParam = 1 }) => api.listTransactions({ page: pageParam as number }), getNextPageParam: (last, pages) => last.data.length >= 5 ? pages.length + 1 : undefined, initialPageParam: 1, enabled: isOnline })
+  const { data: regData, isLoading: regLoading, fetchNextPage: regNext, hasNextPage: regHasMore, isFetchingNextPage: regFetching } = useInfiniteQuery({ queryKey: ['registrations-activity'], queryFn: ({ pageParam = 1 }) => api.listRegistrations({ page: pageParam as number }), getNextPageParam: (last, pages) => last.data.length >= 5 ? pages.length + 1 : undefined, initialPageParam: 1, enabled: isOnline })
+  const loading = isOnline && (txLoading || regLoading)
+  type ActivityItem = { key: string; date: string; label: string; sub1: string; sub2: string; onPress: () => void }
+  const onlineItems: ActivityItem[] = [
+    ...(txData?.pages.flatMap((p) => p.data) ?? []).map((t) => ({ key: t.id, date: t.transactionDate, label: `${t.type === 'SALE' ? 'Sale' : 'Transfer'}: ${t.bicycle.brand ?? ''} ${t.bicycle.model ?? ''}`.trim(), sub1: `${t.seller?.name ?? '—'} → ${t.buyer?.name ?? '—'}`, sub2: `# ${t.transactionId} · ${new Date(t.transactionDate).toLocaleString()}`, onPress: () => onSelectTransaction(t.id) })),
+    ...(regData?.pages.flatMap((p) => p.data) ?? []).map((r) => ({ key: r.id, date: r.createdAt, label: `Registered: ${r.bicycle.brand ?? ''} ${r.bicycle.model ?? ''}`.trim(), sub1: `Owner: ${r.owner.name}`, sub2: `# ${r.bicycle.frameNumber} · ${new Date(r.createdAt).toLocaleString()}`, onPress: () => onOpenDetails(r.bicycle.id, r.bicycle.frameNumber) })),
+  ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+  return <section className="activity-screen">
+    <p className="date-divider">▣ Recent Activity</p>
+    {!isOnline && <div className="offline-notice"><Database size={13} /> Offline — showing queued operations</div>}
+    {loading && <p className="empty-state">Loading...</p>}
+    {isOnline && onlineItems.map((item) => <button className="activity-card" key={item.key} onClick={item.onPress}><span className="activity-mark"><ArrowRight size={16} /></span><span><strong>{item.label}</strong><small>{item.sub1}</small><small>{item.sub2}</small></span><ChevronRight size={16} /></button>)}
+    {isOnline && (txHasMore || regHasMore) && <button className="secondary-button load-button" disabled={txFetching || regFetching} onClick={() => { if (txHasMore) void txNext(); if (regHasMore) void regNext() }}><Cloud size={14} /> {txFetching || regFetching ? 'Loading...' : 'Load more'}</button>}
+    {!isOnline && offlineItems.map((item) => <div className="activity-card" key={item.key}><span className="activity-mark"><Database size={16} /></span><span><strong>{item.label}</strong><small>{item.sub1}</small></span></div>)}
+    {!loading && isOnline && onlineItems.length === 0 && <p className="empty-state">No recent activity.</p>}
+    {!isOnline && offlineItems.length === 0 && <p className="empty-state">No queued operations.</p>}
+  </section>
+}
+
+function ProfileModal({ user, onWarning, onLogout, onAdmin, onClose }: { user: { id: string; name: string; role: Role } | null; onWarning: () => void; onLogout: () => void; onAdmin: () => void; onClose: () => void }) {
+  const initials = user ? user.name.split(' ').map((p) => p[0]).join('').slice(0, 2).toUpperCase() : 'MO'
+  return <div className="owner-modal-backdrop" role="dialog" aria-modal="true"><section className="owner-modal">
+    <header><span><UserRound size={17} /> Profile &amp; Settings</span><button onClick={onClose} aria-label="Close"><X size={18} /></button></header>
+    <div className="owner-modal-identity"><span className="profile-avatar">{initials}</span><span><strong>{user?.name ?? mockUser.name}</strong><small>Field Agent · {mockUser.location}</small></span></div>
+    <button className="settings-row" onClick={onClose}><Settings size={17} /> Field preferences <span>Unit 88 configuration</span><ChevronRight size={15} /></button>
+    <button className="settings-row" onClick={onClose}><FileText size={17} /> Agent handbook <span>v4.2.0-stable</span><ChevronRight size={15} /></button>
+    <button className="warning-row" onClick={onWarning}><ShieldAlert size={17} /> View protocol warning <ChevronRight size={15} /></button>
+    <button className="settings-row" onClick={onAdmin}><ShieldCheck size={17} /> Admin workspace preview <span>Admin</span><ChevronRight size={15} /></button>
+    <button className="logout-button" onClick={onLogout}>End session &amp; secure logs <LockKeyhole size={15} /></button>
+    <p className="profile-footnote">Logging out will clear temporary field caches and lock the encrypted layer.</p>
+  </section></div>
+}
+
+function PeopleScreen({ onSelectPerson }: { onSelectPerson: (person: api.Person) => void }) {
+  const [q, setQ] = useState('')
+  const { data, isLoading, isFetchingNextPage, fetchNextPage, hasNextPage } = useInfiniteQuery({
+    queryKey: ['people', q],
+    queryFn: ({ pageParam = 1 }) => api.listPeople(q || undefined, pageParam as number),
+    getNextPageParam: (lastPage, pages) => lastPage.data.length >= 5 ? pages.length + 1 : undefined,
+    initialPageParam: 1,
+  })
+  const people = data?.pages.flatMap((p) => p.data) ?? []
+  return <section className="search-screen">
+    <div className="search-field"><Search size={16} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name or national ID..." /></div>
+    {isLoading && <p className="empty-state">Loading...</p>}
+    {people.map((p) => <button className="search-record" key={p.id} onClick={() => onSelectPerson(p)}>
+      <span className="record-image"><UserRound size={28} /></span>
+      <span><strong>{p.name}</strong><small>ID: {p.nationalId}</small><small>{p.sector ?? '—'} · {p.village ?? '—'}</small></span>
+      <ChevronRight size={16} />
+    </button>)}
+    {!isLoading && people.length === 0 && <p className="empty-state">No people found.</p>}
+    {hasNextPage && <button className="secondary-button load-button" disabled={isFetchingNextPage} onClick={() => void fetchNextPage()}><Cloud size={14} /> {isFetchingNextPage ? 'Loading...' : 'Load more'}</button>}
+  </section>
+}
+
+function PersonActivityScreen({ person, onSelectTransaction, onOpenDetails }: { person: api.Person | null; onSelectTransaction: (id: string) => void; onOpenDetails: (id: string, frameNumber: string) => void }) {
+  const { data: txData, isLoading: txLoading } = useQuery({ queryKey: ['person-transactions', person?.id], queryFn: () => api.listTransactions({ personId: person!.id }), enabled: !!person })
+  const { data: regData, isLoading: regLoading } = useQuery({ queryKey: ['person-registrations', person?.id], queryFn: () => api.listRegistrations({ ownerId: person!.id }), enabled: !!person })
   const loading = txLoading || regLoading
   type ActivityItem = { key: string; date: string; label: string; sub1: string; sub2: string; onPress: () => void }
   const items: ActivityItem[] = [
     ...(txData?.data ?? []).map((t) => ({ key: t.id, date: t.transactionDate, label: `${t.type === 'SALE' ? 'Sale' : 'Transfer'}: ${t.bicycle.brand ?? ''} ${t.bicycle.model ?? ''}`.trim(), sub1: `${t.seller?.name ?? '—'} → ${t.buyer?.name ?? '—'}`, sub2: `# ${t.transactionId} · ${new Date(t.transactionDate).toLocaleString()}`, onPress: () => onSelectTransaction(t.id) })),
     ...(regData?.data ?? []).map((r) => ({ key: r.id, date: r.createdAt, label: `Registered: ${r.bicycle.brand ?? ''} ${r.bicycle.model ?? ''}`.trim(), sub1: `Owner: ${r.owner.name}`, sub2: `# ${r.bicycle.frameNumber} · ${new Date(r.createdAt).toLocaleString()}`, onPress: () => onOpenDetails(r.bicycle.id, r.bicycle.frameNumber) })),
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-  return <section className="activity-screen"><p className="date-divider">▣ Recent Activity</p>{loading && <p className="empty-state">Loading...</p>}{items.map((item) => <button className="activity-card" key={item.key} onClick={item.onPress}><span className="activity-mark"><ArrowRight size={16} /></span><span><strong>{item.label}</strong><small>{item.sub1}</small><small>{item.sub2}</small></span><ChevronRight size={16} /></button>)}{!loading && items.length === 0 && <p className="empty-state">No recent activity.</p>}</section>
+  return <section className="activity-screen">
+    {person && <div className="registry-identity" style={{ marginBottom: 16 }}><span className="profile-avatar">{person.name.split(' ').map((p) => p[0]).join('').slice(0, 2)}</span><span><strong>{person.name}</strong><small>{person.nationalId}</small></span></div>}
+    <p className="date-divider">▣ All Activity</p>
+    {loading && <p className="empty-state">Loading...</p>}
+    {items.map((item) => <button className="activity-card" key={item.key} onClick={item.onPress}><span className="activity-mark"><ArrowRight size={16} /></span><span><strong>{item.label}</strong><small>{item.sub1}</small><small>{item.sub2}</small></span><ChevronRight size={16} /></button>)}
+    {!loading && items.length === 0 && <p className="empty-state">No activity found for this person.</p>}
+  </section>
 }
-
-function ProfileScreen({ user, onWarning, onLogout, onAdmin }: { user: { id: string; name: string; role: Role } | null; onWarning: () => void; onLogout: () => void; onAdmin: () => void }) { const initials = user ? user.name.split(' ').map((p) => p[0]).join('').slice(0, 2).toUpperCase() : 'MO'; return <section className="profile-screen"><div className="profile-card"><span className="profile-avatar">{initials}</span><span><strong>{user?.name ?? mockUser.name}</strong><small>Field Agent · {mockUser.location}</small></span><ChevronRight size={16} /></div><button className="settings-row"><Settings size={17} /> Field preferences <span>Unit 88 configuration</span><ChevronRight size={15} /></button><button className="settings-row"><FileText size={17} /> Agent handbook <span>v4.2.0-stable</span><ChevronRight size={15} /></button><button className="warning-row" onClick={onWarning}><ShieldAlert size={17} /> View protocol warning <ChevronRight size={15} /></button><button className="settings-row" onClick={onAdmin}><ShieldCheck size={17} /> Admin workspace preview <span>Admin</span><ChevronRight size={15} /></button><button className="logout-button" onClick={onLogout}>End session &amp; secure logs <LockKeyhole size={15} /></button><p className="profile-footnote">Logging out will clear temporary field caches and lock the encrypted layer.</p></section> }
 function BottomNav({ screen, onNavigate }: { screen: Screen; onNavigate: (screen: Screen) => void }) { return <nav className="bottom-nav">{navItems.map(({ screen: item, label, icon: Icon }) => <button className={screen === item ? 'active' : ''} key={item} onClick={() => onNavigate(item)}><Icon size={18} /><small>{label}</small></button>)}</nav> }
 function AdminBottomNav({ screen, onNavigate }: { screen: Screen; onNavigate: (screen: Screen) => void }) { const items: { screen: Screen; label: string; icon: typeof Home }[] = [{ screen: 'admin-home', label: 'Home', icon: Home }, { screen: 'bicycle-inventory', label: 'Bicycles', icon: Bike }, { screen: 'registry-profile', label: 'People', icon: Users }, { screen: 'agent-management', label: 'Agents', icon: UserRound }]; return <nav className="bottom-nav admin-bottom-nav">{items.map(({ screen: item, label, icon: Icon }) => <button className={screen === item || (label === 'Bicycles' && ['admin-transactions', 'transaction-record', 'flagged-queue', 'ownership-chain'].includes(screen)) || (label === 'Agents' && ['agent-onboarding', 'agent-terminal'].includes(screen)) ? 'active' : ''} key={label} onClick={() => onNavigate(item)}><Icon size={18} /><small>{label}</small></button>)}</nav> }
 function OwnerDetailsModal({ person, onClose }: { person: PersonRecord; onClose: () => void }) { return <div className="owner-modal-backdrop" role="dialog" aria-modal="true" aria-label="Owner details"><section className="owner-modal"><header><span><UserRound size={17} /> Owner details</span><button onClick={onClose} aria-label="Close owner details"><X size={18} /></button></header><div className="owner-modal-identity"><span className="profile-avatar">{person.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><strong>{person.name}</strong><small>Existing person record</small></span></div><dl><dt>National ID</dt><dd>{person.nationalId}</dd><dt>Phone</dt><dd>{person.phone}</dd><dt>Cell</dt><dd>{person.cell}</dd><dt>Sector</dt><dd>{person.sector}</dd><dt>Village</dt><dd>{person.village}</dd></dl><p className="owner-modal-note"><ShieldCheck size={14} /> This person can be linked without creating a duplicate record.</p><button className="action-button" onClick={onClose}>Return to verification</button></section></div> }
