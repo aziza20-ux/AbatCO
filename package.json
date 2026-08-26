@@ -1,0 +1,35 @@
+{
+  "name": "abatco",
+  "private": true,
+  "type": "module",
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "dev": "concurrently -k \"npm:dev:web\" \"npm:dev:app\" \"npm:dev:api\"",
+    "dev:web": "npm --workspace @abatco/web run dev",
+    "dev:app": "npm --workspace @abatco/app run dev",
+    "dev:api": "npm --workspace @abatco/api run dev",
+    "build": "npm run build:web && npm run build:app && npm run build:api",
+    "build:web": "npm --workspace @abatco/web run build",
+    "build:app": "npm --workspace @abatco/app run build",
+    "build:api": "npm --workspace @abatco/api run build",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "prisma:generate": "prisma generate",
+    "prisma:validate": "prisma validate"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.34.0",
+    "@typescript-eslint/eslint-plugin": "^8.41.0",
+    "@typescript-eslint/parser": "^8.41.0",
+    "concurrently": "^9.2.0",
+    "eslint": "^9.34.0",
+    "eslint-config-prettier": "^10.1.0",
+    "prettier": "^3.6.0",
+    "typescript": "^5.9.0",
+    "typescript-eslint": "^8.41.0"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.15.0",
+    "prisma": "^6.15.0"
+  }
+}

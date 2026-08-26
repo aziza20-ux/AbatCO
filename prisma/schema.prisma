@@ -1,0 +1,129 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  AGENT
+}
+
+enum TransactionType {
+  SALE
+  TRANSFER
+}
+
+enum BicycleStatus {
+  ACTIVE
+  STOLEN
+  DECOMMISSIONED
+}
+
+enum FlagStatus {
+  NONE
+  FLAGGED
+  REVIEWED
+}
+
+model User {
+  id           String         @id @default(cuid())
+  email        String         @unique
+  passwordHash String
+  name         String
+  role         Role           @default(AGENT)
+  transactions Transaction[]
+  adminReviews Transaction[] @relation("AdminReviews")
+  registrations Registration[]
+  auditLogs    AuditLog[]
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+}
+
+model Person {
+  id              String         @id @default(cuid())
+  name            String
+  nationalId      String         @unique
+  phone           String?
+  address         String?
+  currentBicycles Bicycle[]      @relation("CurrentOwner")
+  registrations   Registration[]
+  soldTransactions Transaction[] @relation("Seller")
+  boughtTransactions Transaction[] @relation("Buyer")
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  @@index([name])
+}
+
+model Bicycle {
+  id                     String         @id @default(cuid())
+  frameNumber            String         @unique
+  brand                  String?
+  model                  String?
+  color                  String?
+  distinguishingFeatures String?
+  photos                 String[]       @default([])
+  currentOwnerId         String?
+  currentOwner           Person?        @relation("CurrentOwner", fields: [currentOwnerId], references: [id])
+  status                 BicycleStatus  @default(ACTIVE)
+  transactions           Transaction[]
+  registrations          Registration[]
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
+  @@index([currentOwnerId])
+}
+
+model Transaction {
+  id                String          @id @default(cuid())
+  type              TransactionType
+  bicycleId         String
+  bicycle           Bicycle         @relation(fields: [bicycleId], references: [id])
+  sellerId          String?
+  seller            Person?         @relation("Seller", fields: [sellerId], references: [id])
+  buyerId           String?
+  buyer             Person?         @relation("Buyer", fields: [buyerId], references: [id])
+  recordingAgentId  String
+  recordingAgent    User            @relation(fields: [recordingAgentId], references: [id])
+  price             Decimal?        @db.Decimal(12, 2)
+  reason            String?
+  location          String?
+  transactionDate   DateTime        @default(now())
+  flagStatus        FlagStatus      @default(NONE)
+  flagReason        String?
+  adminReviewedById String?
+  adminReviewedBy   User?           @relation("AdminReviews", fields: [adminReviewedById], references: [id])
+  adminReviewedAt   DateTime?
+  adminReviewNotes  String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  @@index([bicycleId, transactionDate])
+  @@index([recordingAgentId, transactionDate])
+}
+
+model Registration {
+  id               String   @id @default(cuid())
+  bicycleId        String
+  bicycle          Bicycle  @relation(fields: [bicycleId], references: [id])
+  ownerId          String
+  owner            Person   @relation(fields: [ownerId], references: [id])
+  recordingAgentId String
+  recordingAgent   User     @relation(fields: [recordingAgentId], references: [id])
+  createdAt        DateTime @default(now())
+  @@index([recordingAgentId, createdAt])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  action    String
+  entity    String
+  entityId  String
+  timestamp DateTime @default(now())
+  metadata  Json?
+  @@index([entity, entityId])
+  @@index([userId, timestamp])
+}
