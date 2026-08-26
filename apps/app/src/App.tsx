@@ -69,7 +69,7 @@ export default function App() {
 
   return <div className="terminal-shell">
     <header className="terminal-header">
-      {screen !== 'home' && screen !== 'admin-home' && <button className="back-button" onClick={() => go(screen === 'details' ? detailsOrigin : screen === 'transaction-record' ? transactionOrigin : screen === 'person-activity' ? 'people' : role === 'ADMIN' ? 'admin-home' : 'home')} aria-label="Go back"><ArrowLeft size={17} /></button>}
+      {screen !== 'home' && screen !== 'admin-home' && <button className="back-button" onClick={() => go(screen === 'details' ? detailsOrigin : screen === 'transaction-record' ? transactionOrigin : screen === 'person-activity' ? (role === 'ADMIN' ? 'registry-profile' : 'people') : role === 'ADMIN' ? 'admin-home' : 'home')} aria-label="Go back"><ArrowLeft size={17} /></button>}
       <strong>{screenTitle(screen)}</strong>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span className="wifi-badge" title="Online"><Wifi size={14} /></span>
@@ -78,13 +78,12 @@ export default function App() {
     </header>
     <div className="terminal-content">
       {screen === 'home' && <HomeScreen onNavigate={go} onSelect={openDetails} pendingCount={pendingCount} isOnline={isOnline} />}
-      {screen === 'admin-home' && <AdminHomeScreen onNavigate={go} />}
+      {screen === 'admin-home' && <AdminHomeScreen onNavigate={go} onManageProfile={() => setShowProfile(true)} />}
       {screen === 'admin-transactions' && <AdminTransactionsScreen onNavigate={go} onSelectTransaction={(id) => { setSelectedTransactionId(id); setTransactionOrigin('admin-transactions') }} />}
       {screen === 'transaction-record' && <AdminRecordScreen transactionId={selectedTransactionId} onNavigate={go} />}
       {screen === 'flagged-queue' && <FlaggedQueueScreen onNavigate={go} />}
       {screen === 'bicycle-inventory' && <BicycleInventoryScreen onNavigate={go} />}
       {screen === 'ownership-chain' && <OwnershipChainScreen onNavigate={go} />}
-      {screen === 'registry-profile' && <RegistryProfileScreen onNavigate={go} />}
       {screen === 'agent-management' && <AgentManagementScreen onNavigate={go} onSelectAgent={(a) => { setSelectedAgent(a); go('agent-terminal') }} />}
       {screen === 'agent-onboarding' && <AgentOnboardingScreen onNavigate={(s) => { if (s !== 'agent-onboarding') setSelectedAgent(null); go(s) }} />}
       {screen === 'agent-terminal' && <AgentTerminalScreen agent={selectedAgent} onNavigate={go} />}
@@ -96,6 +95,7 @@ export default function App() {
       {screen === 'activity' && <ActivityScreen onOpenDetails={openDetailsById} onSelectTransaction={(id) => { setSelectedTransactionId(id); setTransactionOrigin('activity'); go('transaction-record') }} />}
       {screen === 'people' && <PeopleScreen onSelectPerson={(p) => { setSelectedPerson(p); go('person-activity') }} />}
       {screen === 'person-activity' && <PersonActivityScreen person={selectedPerson} onSelectTransaction={(id) => { setSelectedTransactionId(id); setTransactionOrigin('person-activity'); go('transaction-record') }} onOpenDetails={openDetailsById} />}
+      {screen === 'registry-profile' && <PeopleScreen onSelectPerson={(p) => { setSelectedPerson(p); go('person-activity') }} />}
     </div>
     {role === 'ADMIN' ? <AdminBottomNav screen={screen} onNavigate={go} /> : screen !== 'transaction' && screen !== 'register' && screen !== 'details' && screen !== 'person-activity' && <BottomNav screen={screen} onNavigate={go} />}
     {warning && <WarningModal onClose={() => setWarning(false)} />}
@@ -146,7 +146,7 @@ function HomeScreen({ onNavigate, onSelect, pendingCount, isOnline }: { onNaviga
   </>
 }
 
-function AdminHomeScreen({ onNavigate }: { onNavigate: (screen: Screen) => void }) {
+function AdminHomeScreen({ onNavigate, onManageProfile }: { onNavigate: (screen: Screen) => void; onManageProfile: () => void }) {
   const { data: dashData } = useQuery({ queryKey: ['dashboard'], queryFn: () => api.getDashboard() })
   const stats = dashData?.data ?? null
   const metrics = [['Total registered', stats ? String(stats.bicycles) : '…', TrendingUp], ['Active agents', stats ? String(stats.activeAgents) : '…', Users], ['Transactions', stats ? String(stats.transactions) : '…', Cloud], ['Flagged alerts', stats ? String(stats.flags) : '…', Flag]] as const
@@ -157,7 +157,7 @@ function AdminHomeScreen({ onNavigate }: { onNavigate: (screen: Screen) => void 
     <div className="admin-section-heading"><span><Flag size={13} /> Flagged queue</span><button onClick={() => onNavigate('flagged-queue')}>View all</button></div><p className="admin-subtitle">Immediate resolution required</p>
     <p className="admin-section-label"><TrendingUp size={11} /> Control modules</p><div className="module-grid">{modules.map(([label, copy, Icon], index) => <button key={label} className={index === 5 ? 'module danger' : 'module'} onClick={() => onNavigate(['admin-transactions', 'bicycle-inventory', 'registry-profile', 'agent-management', 'reports-exports', 'flagged-queue'][index] as Screen)}><Icon size={15} /><strong>{label}</strong><small>{copy}</small>{index === 5 && <b>!</b>}</button>)}</div>
     <button className="admin-register" onClick={() => onNavigate('register')}><Plus size={14} /> Register new bicycle</button>
-    <div className="admin-footer-actions"><button onClick={() => onNavigate('profile')}>Manage profile</button></div><p className="admin-integrity">"Integrity in every record, security in every chain."</p>
+    <div className="admin-footer-actions"><button onClick={onManageProfile}>Manage profile</button></div><p className="admin-integrity">"Integrity in every record, security in every chain."</p>
   </section>
 }
 
@@ -636,6 +636,6 @@ function PersonActivityScreen({ person, onSelectTransaction, onOpenDetails }: { 
   </section>
 }
 function BottomNav({ screen, onNavigate }: { screen: Screen; onNavigate: (screen: Screen) => void }) { return <nav className="bottom-nav">{navItems.map(({ screen: item, label, icon: Icon }) => <button className={screen === item ? 'active' : ''} key={item} onClick={() => onNavigate(item)}><Icon size={18} /><small>{label}</small></button>)}</nav> }
-function AdminBottomNav({ screen, onNavigate }: { screen: Screen; onNavigate: (screen: Screen) => void }) { const items: { screen: Screen; label: string; icon: typeof Home }[] = [{ screen: 'admin-home', label: 'Home', icon: Home }, { screen: 'bicycle-inventory', label: 'Bicycles', icon: Bike }, { screen: 'registry-profile', label: 'People', icon: Users }, { screen: 'agent-management', label: 'Agents', icon: UserRound }]; return <nav className="bottom-nav admin-bottom-nav">{items.map(({ screen: item, label, icon: Icon }) => <button className={screen === item || (label === 'Bicycles' && ['admin-transactions', 'transaction-record', 'flagged-queue', 'ownership-chain'].includes(screen)) || (label === 'Agents' && ['agent-onboarding', 'agent-terminal'].includes(screen)) ? 'active' : ''} key={label} onClick={() => onNavigate(item)}><Icon size={18} /><small>{label}</small></button>)}</nav> }
+function AdminBottomNav({ screen, onNavigate }: { screen: Screen; onNavigate: (screen: Screen) => void }) { const items: { screen: Screen; label: string; icon: typeof Home }[] = [{ screen: 'admin-home', label: 'Home', icon: Home }, { screen: 'bicycle-inventory', label: 'Bicycles', icon: Bike }, { screen: 'registry-profile', label: 'People', icon: Users }, { screen: 'agent-management', label: 'Agents', icon: UserRound }]; return <nav className="bottom-nav admin-bottom-nav">{items.map(({ screen: item, label, icon: Icon }) => <button className={screen === item || (label === 'Bicycles' && ['admin-transactions', 'transaction-record', 'flagged-queue', 'ownership-chain'].includes(screen)) || (label === 'People' && screen === 'person-activity') || (label === 'Agents' && ['agent-onboarding', 'agent-terminal'].includes(screen)) ? 'active' : ''} key={label} onClick={() => onNavigate(item)}><Icon size={18} /><small>{label}</small></button>)}</nav> }
 function OwnerDetailsModal({ person, onClose }: { person: PersonRecord; onClose: () => void }) { return <div className="owner-modal-backdrop" role="dialog" aria-modal="true" aria-label="Owner details"><section className="owner-modal"><header><span><UserRound size={17} /> Owner details</span><button onClick={onClose} aria-label="Close owner details"><X size={18} /></button></header><div className="owner-modal-identity"><span className="profile-avatar">{person.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><span><strong>{person.name}</strong><small>Existing person record</small></span></div><dl><dt>National ID</dt><dd>{person.nationalId}</dd><dt>Phone</dt><dd>{person.phone}</dd><dt>Cell</dt><dd>{person.cell}</dd><dt>Sector</dt><dd>{person.sector}</dd><dt>Village</dt><dd>{person.village}</dd></dl><p className="owner-modal-note"><ShieldCheck size={14} /> This person can be linked without creating a duplicate record.</p><button className="action-button" onClick={onClose}>Return to verification</button></section></div> }
 function WarningModal({ onClose }: { onClose: () => void }) { return <div className="warning-backdrop"><div className="warning-modal"><header><ShieldAlert size={28} /><button onClick={onClose}><X size={18} /></button></header><h2>Critical warning</h2><p>Ownership mismatch detected. The seller does not match the bicycle's active record. Immediate informed procedure recommended.</p><button className="action-button" onClick={onClose}>Acknowledge protocol</button><button className="quiet-button" onClick={onClose}>Dismiss</button></div></div> }
