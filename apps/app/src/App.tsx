@@ -507,6 +507,20 @@ function SearchScreen({ query, setQuery, onSelect }: { query: string; setQuery: 
   </section>
 }
 
+function PersonExpandable({ person }: { person: api.PersonSummary & { nationalId?: string } }) {
+  const [open, setOpen] = useState(false)
+  return <div className="person-expandable">
+    <button className="person-expand-btn" onClick={() => setOpen((v) => !v)}>{open ? 'View less' : 'View more'} <ChevronRight size={13} style={{ transform: open ? 'rotate(90deg)' : undefined }} /></button>
+    {open && <dl className="person-expand-details">
+      {person.nationalId && <><dt>National ID</dt><dd>{person.nationalId}</dd></>}
+      {person.phone && <><dt>Phone</dt><dd>{person.phone}</dd></>}
+      {person.cell && <><dt>Cell</dt><dd>{person.cell}</dd></>}
+      {person.sector && <><dt>Sector</dt><dd>{person.sector}</dd></>}
+      {person.village && <><dt>Village</dt><dd>{person.village}</dd></>}
+    </dl>}
+  </div>
+}
+
 function DetailsScreen({ record }: { record: BicycleRecord }) {
   const { data: bikeData, isLoading } = useQuery({ queryKey: ['bicycle', record.id], queryFn: () => api.getBicycle(record.id) })
   const { data: txData } = useQuery({ queryKey: ['transactions', record.frameNumber], queryFn: () => api.listTransactions({ q: record.frameNumber }), enabled: !!record.id })
@@ -518,8 +532,13 @@ function DetailsScreen({ record }: { record: BicycleRecord }) {
     <div className="detail-heading"><span><small>Frame serial</small><strong>{record.frameNumber}</strong></span><em className={record.status === 'Verified' ? 'verified' : 'flagged'}>◉ {record.status}</em></div>
     {isLoading && <p className="empty-state">Loading...</p>}
     <div className="asset-card"><div className="asset-image"><Bike size={52} /><span>Bicycle asset</span></div><div><small>Brand / Model</small><strong>{bike?.brand ?? '—'} {bike?.model ?? ''}</strong></div><div><small>Frame color</small><strong>{bike?.color ?? record.color}</strong></div><div><small>Current owner</small><strong>{bike?.currentOwner?.name ?? record.owner}</strong></div></div>
-    {lastTx && <><p className="detail-date"><CalendarDays size={13} /> {new Date(lastTx.transactionDate).toLocaleString()}</p><div className="parties-card"><h2><ArrowRight size={15} /> Last transaction · {lastTx.transactionId}</h2><div><small>Seller (outbound)</small><strong>{lastTx.seller?.name ?? '—'}</strong></div><div><small>Buyer (inbound)</small><strong>{lastTx.buyer?.name ?? '—'}</strong></div><div><small>Recorded by</small><strong>{lastTx.recordingAgent.name}</strong></div></div></> }
-    {!lastTx && registration && <><p className="detail-date"><CalendarDays size={13} /> Registered {new Date(registration.createdAt).toLocaleString()}</p><div className="parties-card"><h2><Bike size={15} /> Registration record</h2><div><small>Owner</small><strong>{registration.owner.name}</strong></div><div><small>National ID</small><strong>{registration.owner.nationalId}</strong></div><div><small>Recorded by</small><strong>{registration.recordingAgent.name}</strong></div></div></> }
+    {lastTx && <><p className="detail-date"><CalendarDays size={13} /> {new Date(lastTx.transactionDate).toLocaleString()}</p><div className="parties-card"><h2><ArrowRight size={15} /> Last transaction · {lastTx.transactionId}</h2>
+      <div><small>Seller (outbound)</small><strong>{lastTx.seller?.name ?? '—'}</strong>{lastTx.seller && <PersonExpandable person={lastTx.seller} />}</div>
+      <div><small>Buyer (inbound)</small><strong>{lastTx.buyer?.name ?? '—'}</strong>{lastTx.buyer && <PersonExpandable person={lastTx.buyer} />}</div>
+      <div><small>Recorded by</small><strong>{lastTx.recordingAgent.name}</strong></div></div></> }
+    {!lastTx && registration && <><p className="detail-date"><CalendarDays size={13} /> Registered {new Date(registration.createdAt).toLocaleString()}</p><div className="parties-card"><h2><Bike size={15} /> Registration record</h2>
+      <div><small>Owner</small><strong>{registration.owner.name}</strong><PersonExpandable person={registration.owner} /></div>
+      <div><small>Recorded by</small><strong>{registration.recordingAgent.name}</strong></div></div></> }
     <div className="location-card"><MapPin size={17} /><span><small>Status</small><strong>{bike?.status ?? '—'}</strong></span></div>
     <button className="action-button export-button"><Send size={14} /> Export certified record (PDF)</button>
   </section>

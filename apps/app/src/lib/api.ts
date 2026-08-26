@@ -103,7 +103,8 @@ export async function updateBicycle(id: string, data: { brand?: string; model?: 
 
 // ── Transactions ──────────────────────────────────────────────────────────────
 
-export type Transaction = { id: string; transactionId: string; type: 'SALE' | 'TRANSFER'; price?: number; serviceFee?: number; reason?: string; location?: string; transactionDate: string; flagStatus: string; flagReason?: string; agentNote?: string; adminReviewNotes?: string; bicycle: { id: string; frameNumber: string; brand?: string; model?: string }; seller?: { id: string; name: string }; buyer?: { id: string; name: string }; recordingAgent: { id: string; name: string } }
+export type PersonSummary = { id: string; name: string; nationalId?: string; phone?: string; cell?: string; sector?: string; village?: string }
+export type Transaction = { id: string; transactionId: string; type: 'SALE' | 'TRANSFER'; price?: number; serviceFee?: number; reason?: string; location?: string; transactionDate: string; flagStatus: string; flagReason?: string; agentNote?: string; adminReviewNotes?: string; bicycle: { id: string; frameNumber: string; brand?: string; model?: string }; seller?: PersonSummary; buyer?: PersonSummary; recordingAgent: { id: string; name: string } }
 
 export async function listTransactions(params?: { q?: string; flagStatus?: string; agentId?: string; personId?: string; page?: number }) {
   const search = new URLSearchParams({ page: String(params?.page ?? 1), limit: '5', ...(params?.q ? { q: params.q } : {}), ...(params?.flagStatus ? { flagStatus: params.flagStatus } : {}), ...(params?.agentId ? { agentId: params.agentId } : {}), ...(params?.personId ? { personId: params.personId } : {}) })
@@ -124,7 +125,7 @@ export async function editTransaction(id: string, data: object) {
 
 // ── Registrations ─────────────────────────────────────────────────────────────
 
-export type Registration = { id: string; bicycleId: string; ownerId: string; createdAt: string; bicycle: { id: string; frameNumber: string; brand?: string; model?: string }; owner: { id: string; name: string; nationalId: string }; recordingAgent: { id: string; name: string } }
+export type Registration = { id: string; bicycleId: string; ownerId: string; createdAt: string; bicycle: { id: string; frameNumber: string; brand?: string; model?: string }; owner: PersonSummary & { nationalId: string }; recordingAgent: { id: string; name: string } }
 
 export async function listRegistrations(params?: { bicycleId?: string; ownerId?: string; page?: number }) {
   const search = new URLSearchParams({ page: String(params?.page ?? 1), limit: '5', ...(params?.bicycleId ? { bicycleId: params.bicycleId } : {}), ...(params?.ownerId ? { ownerId: params.ownerId } : {}) })
