@@ -34,6 +34,15 @@ export async function refresh(request: Request, response: Response) {
   return response.json({ data: { token: accessToken(result.user) } })
 }
 
+export async function changePassword(request: AuthRequest, response: Response) {
+  const input = z.object({ currentPassword: z.string().min(1), newPassword: z.string().min(12).max(200) }).parse(request.body)
+  const user = await prisma.user.findUnique({ where: { id: request.user!.id } })
+  if (!user || !(await bcrypt.compare(input.currentPassword, user.passwordHash))) return response.status(401).json({ error: { code: 'INVALID_CREDENTIALS', message: 'Current password is incorrect' } })
+  await prisma.user.update({ where: { id: user.id }, data: { passwordHash: await bcrypt.hash(input.newPassword, 12) } })
+  await audit(user.id, 'PASSWORD_CHANGED', 'User', user.id)
+  return response.status(204).send()
+}
+
 export async function logout(request: AuthRequest, response: Response) {
   const raw = refreshValue(request)
   if (raw) await revokeRefreshToken(raw)

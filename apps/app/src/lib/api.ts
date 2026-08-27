@@ -40,6 +40,10 @@ export async function refreshAccessToken() {
   await silentRefresh()
 }
 
+export async function changePassword(currentPassword: string, newPassword: string) {
+  return apiRequest<void>('/auth/password', { method: 'PATCH', body: JSON.stringify({ currentPassword, newPassword }) })
+}
+
 export async function logout() {
   await apiRequest<void>('/auth/logout', { method: 'POST' })
   localStorage.removeItem('abatco_token')
