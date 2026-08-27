@@ -15,6 +15,7 @@ import { uploadsRouter } from './routes/uploads.js'
 import { auditRouter } from './routes/audit.js'
 
 export const app = express()
+app.set('trust proxy', 1)
 const allowedOrigins = [process.env.WEB_ORIGIN, process.env.APP_ORIGIN].filter((origin): origin is string => Boolean(origin))
 app.use(helmet())
 app.use(cors({ origin: allowedOrigins.length ? allowedOrigins : false, credentials: true }))
