@@ -64,7 +64,7 @@ export default function App() {
   const openDetailsById = async (id: string, frameNumber: string) => {
     const result = await api.listBicycles(frameNumber).catch(() => null)
     const bike = result?.data.find((b) => b.id === id) ?? result?.data[0]
-    if (bike) openDetails({ id: bike.id, frameNumber: bike.frameNumber, name: `${bike.brand ?? ''} ${bike.model ?? ''}`.trim() || bike.frameNumber, type: 'Bicycle', color: bike.color ?? 'â€”', owner: bike.currentOwner?.name ?? 'â€”', location: 'â€”', status: bike.status === 'ACTIVE' ? 'Verified' : 'Needs review', date: '' }, 'activity')
+    if (bike) openDetails({ id: bike.id, frameNumber: bike.frameNumber, name: `${bike.brand ?? ''} ${bike.model ?? ''}`.trim() || bike.frameNumber, type: 'Bicycle', color: bike.color ?? '—', owner: bike.currentOwner?.name ?? '—', location: '—', status: bike.status === 'ACTIVE' ? 'Verified' : 'Needs review', date: '' }, 'activity')
   }
   const profileOrigin = (): Screen => role === 'ADMIN' ? 'admin-home' : 'home'
   const go = (next: Screen) => { setSaved(false); if (next === 'transaction') setTransactionStep(0); setScreen(next) }
@@ -143,6 +143,22 @@ function ResetPasswordScreen({ email, onBack, onDone }: { email: string; onBack:
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState(false)
+  const [resendCooldown, setResendCooldown] = useState(30)
+  const [resending, setResending] = useState(false)
+  useEffect(() => {
+    if (resendCooldown <= 0) return
+    const t = setTimeout(() => setResendCooldown((c) => c - 1), 1000)
+    return () => clearTimeout(t)
+  }, [resendCooldown])
+  const resend = async () => {
+    setResending(true); setError(null)
+    try { await api.forgotPassword(email); setResendCooldown(30) }
+    catch (err: unknown) {
+      const msg = (err as { message?: string })?.message ?? ''
+      setError(msg.includes('30') ? 'Please wait 30 seconds before resending.' : 'Failed to resend code. Try again.')
+    }
+    finally { setResending(false) }
+  }
   const submit = async () => {
     if (newPassword !== confirm) { setError('Passwords do not match'); return }
     if (newPassword.length < 12) { setError('Password must be at least 12 characters'); return }
@@ -164,7 +180,10 @@ function ResetPasswordScreen({ email, onBack, onDone }: { email: string; onBack:
         <label><span><LockKeyhole size={12} /> Confirm password</span><input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} /></label>
         {error && <p style={{ color: '#e05', fontSize: 13 }}>{error}</p>}
         <button className="action-button" disabled={busy || !otp || !newPassword || !confirm} onClick={() => void submit()}>{busy ? 'Resetting...' : 'Reset password'} <ArrowRight size={16} /></button>
-        <button className="quiet-button" style={{ marginTop: 12 }} onClick={onBack}>Back</button>
+        <button className="quiet-button" style={{ marginTop: 8 }} disabled={resendCooldown > 0 || resending} onClick={() => void resend()}>
+          {resending ? 'Sending...' : resendCooldown > 0 ? `Resend code in ${resendCooldown}s` : 'Resend code'}
+        </button>
+        <button className="quiet-button" style={{ marginTop: 4 }} onClick={onBack}>Back</button>
       </>}
     </section>
   </main>
@@ -198,21 +217,21 @@ function Login({ onLogin, onForgot }: { onLogin: (user: { id: string; name: stri
 function HomeScreen({ onNavigate, onSelect, pendingCount, isOnline }: { onNavigate: (screen: Screen) => void; onSelect: (record: BicycleRecord) => void; pendingCount: number; isOnline: boolean }) {
   const { data: recentData } = useQuery({ queryKey: ['bicycles', '', 1], queryFn: () => api.listBicycles(undefined, 1) })
   const recentBike = recentData?.data[0] ?? null
-  const recentRecord: BicycleRecord | null = recentBike ? { id: recentBike.id, frameNumber: recentBike.frameNumber, name: `${recentBike.brand ?? ''} ${recentBike.model ?? ''}`.trim() || recentBike.frameNumber, type: 'Bicycle', color: recentBike.color ?? 'â€”', owner: recentBike.currentOwner?.name ?? 'â€”', location: 'â€”', status: recentBike.status === 'ACTIVE' ? 'Verified' : 'Needs review', date: '' } : null
+  const recentRecord: BicycleRecord | null = recentBike ? { id: recentBike.id, frameNumber: recentBike.frameNumber, name: `${recentBike.brand ?? ''} ${recentBike.model ?? ''}`.trim() || recentBike.frameNumber, type: 'Bicycle', color: recentBike.color ?? '—', owner: recentBike.currentOwner?.name ?? '—', location: '—', status: recentBike.status === 'ACTIVE' ? 'Verified' : 'Needs review', date: '' } : null
   return <>
     <section className="welcome"><p className="screen-kicker">LOGGED IN AS FIELD AGENT</p><h1>Operations Center</h1></section>
     <button className="feature-button" onClick={() => onNavigate('transaction')}><span className="feature-icon"><FileText size={22} /></span><span><strong>New Transaction</strong><small>Initiate bicycle sale or transfer</small></span><ArrowRight /></button>
     <button className="feature-button" onClick={() => onNavigate('register')}><span className="feature-icon"><Bike size={22} /></span><span><strong>Register Bicycle</strong><small>Capture serial & owner data</small></span><ArrowRight /></button>
     <div className="quick-grid"><button onClick={() => onNavigate('search')}><Search size={20} /><strong>Search</strong></button><button onClick={() => onNavigate('activity')}><Activity size={20} /><strong>Activity</strong></button></div>
     <p className="section-label">Session intelligence</p><div className="intelligence"><div><small>Today's tasks</small><strong>{pendingCount > 0 ? `${pendingCount} pending sync` : 'All synced'}</strong></div><div><small>Local cache</small><strong className="lime">Active</strong></div>{!isOnline && <footer><Database size={13} /> Offline database active</footer>}</div>
-    {recentRecord && <><p className="section-label">Last modified record</p><button className="record-row" onClick={() => onSelect(recentRecord)}><span className="record-icon"><Bike size={18} /></span><span><strong>{recentRecord.frameNumber}</strong><small>â—· Most recent bicycle</small></span><ChevronRight size={17} /></button></>}
+    {recentRecord && <><p className="section-label">Last modified record</p><button className="record-row" onClick={() => onSelect(recentRecord)}><span className="record-icon"><Bike size={18} /></span><span><strong>{recentRecord.frameNumber}</strong><small>◷ Most recent bicycle</small></span><ChevronRight size={17} /></button></>}
   </>
 }
 
 function AdminHomeScreen({ onNavigate, onManageProfile, onSetRegisterOrigin }: { onNavigate: (screen: Screen) => void; onManageProfile: () => void; onSetRegisterOrigin: (o: RegisterOrigin) => void }) {
   const { data: dashData } = useQuery({ queryKey: ['dashboard'], queryFn: () => api.getDashboard() })
   const stats = dashData?.data ?? null
-  const metrics = [['Total registered', stats ? String(stats.bicycles) : 'â€¦', TrendingUp], ['Active agents', stats ? String(stats.activeAgents) : 'â€¦', Users], ['Transactions', stats ? String(stats.transactions) : 'â€¦', Cloud], ['Flagged alerts', stats ? String(stats.flags) : 'â€¦', Flag]] as const
+  const metrics = [['Total registered', stats ? String(stats.bicycles) : '…', TrendingUp], ['Active agents', stats ? String(stats.activeAgents) : '…', Users], ['Transactions', stats ? String(stats.transactions) : '…', Cloud], ['Flagged alerts', stats ? String(stats.flags) : '…', Flag]] as const
   const modules = [['Transactions', 'Historical log', Activity], ['Bicycles', 'Registry inventory', Bike], ['People', 'Owner directory', Users], ['Field agents', 'Team management', UserRound], ['Reports', 'Export & analytics', FileText], ['Flagged', 'Priority queue', Flag]] as const
   return <section className="admin-home">
     <div className="admin-brand"><span>BIKETRACK ADMIN</span><small>RECORD-KEEPING CONTROL CENTER</small></div>
@@ -240,8 +259,8 @@ function AdminTransactionsScreen({ onNavigate, onSelectTransaction }: { onNaviga
     {loading && <p className="empty-state">Loading...</p>}
     <div className="transaction-list">{transactions.map((t) => <button className="transaction-item" key={t.id} onClick={() => { onSelectTransaction(t.id); onNavigate('transaction-record') }}>
       <div className="transaction-item-head"><span className={`transaction-type ${t.type.toLowerCase()}`}>{t.type}</span><em className={t.flagStatus === 'NONE' ? 'verified' : t.flagStatus === 'FLAGGED' ? 'flagged' : 'pending'}>{t.flagStatus}</em></div>
-      <strong>{t.bicycle.brand} {t.bicycle.model}</strong><small className="transaction-frame">{t.bicycle.frameNumber} Â· {t.transactionId}</small>
-      <div className="transaction-meta"><span>{t.seller?.name ?? 'â€”'} â†’ {t.buyer?.name ?? 'â€”'}</span><span>{t.recordingAgent.name}</span><span>{new Date(t.transactionDate).toLocaleDateString()}</span></div>
+      <strong>{t.bicycle.brand} {t.bicycle.model}</strong><small className="transaction-frame">{t.bicycle.frameNumber} · {t.transactionId}</small>
+      <div className="transaction-meta"><span>{t.seller?.name ?? '—'} → {t.buyer?.name ?? '—'}</span><span>{t.recordingAgent.name}</span><span>{new Date(t.transactionDate).toLocaleDateString()}</span></div>
       <ChevronRight size={15} /></button>)}
     </div>
     {!loading && transactions.length === 0 && <p className="empty-state">No transactions match this search.</p>}
@@ -262,7 +281,7 @@ function AdminRecordScreen({ transactionId, onNavigate }: { transactionId: strin
     {isLoading && <p className="empty-state">Loading...</p>}
     {t && <>
       {(t.flagStatus === 'FLAGGED' || t.flagStatus === 'CONFLICTED') && <div className="admin-record-alert"><ShieldAlert size={14} /><strong>Resolution required</strong><small>{t.flagReason ?? 'Flagged record requires administrator review.'}</small></div>}
-      <AdminInfo title="Transaction summary" rows={[`${t.type} Â· ${new Date(t.transactionDate).toLocaleString()}`, `${t.bicycle.brand ?? ''} ${t.bicycle.model ?? ''} Â· ${t.bicycle.frameNumber}`, `${t.seller?.name ?? 'â€”'} â†’ ${t.buyer?.name ?? 'â€”'}`, `Recorded by ${t.recordingAgent.name}`]} />
+      <AdminInfo title="Transaction summary" rows={[`${t.type} · ${new Date(t.transactionDate).toLocaleString()}`, `${t.bicycle.brand ?? ''} ${t.bicycle.model ?? ''} · ${t.bicycle.frameNumber}`, `${t.seller?.name ?? '—'} → ${t.buyer?.name ?? '—'}`, `Recorded by ${t.recordingAgent.name}`]} />
       <em className={t.flagStatus === 'NONE' || t.flagStatus === 'REVIEWED' ? 'verified' : 'flagged'} style={{ display: 'block', marginBottom: 12 }}>{t.flagStatus}</em>
       {noteOpen && <label style={{ display: 'block', marginBottom: 8 }}>Admin note<textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional review note..." style={{ width: '100%', marginTop: 4 }} /></label>}
       <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
@@ -285,7 +304,7 @@ function FlaggedQueueScreen({ onNavigate, onSelectTransaction }: { onNavigate: (
     mutationFn: ({ id, resolution, note }: { id: string; resolution: 'ACCEPT' | 'REJECT'; note?: string }) => api.resolveConflict(id, resolution, note),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['conflicts'] }); queryClient.invalidateQueries({ queryKey: ['transactions'] }) },
   })
-  return <AdminPanel title="Flagged Queue" kicker={`ACTIVE INCIDENTS Â· ${flagged.length + conflicts.length}`}>
+  return <AdminPanel title="Flagged Queue" kicker={`ACTIVE INCIDENTS · ${flagged.length + conflicts.length}`}>
     <div className="admin-filters" style={{ marginBottom: 12 }}>
       <button className={tab === 'flagged' ? 'selected' : ''} onClick={() => setTab('flagged')}>Flagged ({flagged.length})</button>
       <button className={tab === 'conflicts' ? 'selected' : ''} onClick={() => setTab('conflicts')}>Conflicts ({conflicts.length})</button>
@@ -304,7 +323,7 @@ function FlaggedQueueScreen({ onNavigate, onSelectTransaction }: { onNavigate: (
         return <div className="incident-card" key={c.id} style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
             <ShieldAlert size={14} />
-            <strong style={{ flex: 1 }}>{c.entity}<small>{c.user.name} Â· {new Date(c.createdAt).toLocaleDateString()}</small></strong>
+            <strong style={{ flex: 1 }}>{c.entity}<small>{c.user.name} · {new Date(c.createdAt).toLocaleDateString()}</small></strong>
           </div>
           {c.conflictReason && <small style={{ color: '#e05' }}>{c.conflictReason}</small>}
           <div style={{ display: 'flex', gap: 8 }}>
@@ -323,7 +342,7 @@ function BicycleInventoryScreen({ onNavigate, onSelectBicycle }: { onNavigate: (
   const bicycles = data?.data ?? []
   return <AdminPanel title="Bicycle Inventory" kicker="REGISTRY INVENTORY">
     <div className="admin-search"><Search size={14} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search SN, Brand, or Owner..." /></div>
-    {bicycles.map((bike) => <button className="inventory-item" key={bike.id} onClick={() => onSelectBicycle(bike)}><Bike size={18} /><strong>{bike.brand} {bike.model}<small>SN: {bike.frameNumber} Â· {bike.currentOwner?.name ?? 'â€”'}</small></strong><em>{bike.status}</em><ChevronRight size={14} /></button>)}
+    {bicycles.map((bike) => <button className="inventory-item" key={bike.id} onClick={() => onSelectBicycle(bike)}><Bike size={18} /><strong>{bike.brand} {bike.model}<small>SN: {bike.frameNumber} · {bike.currentOwner?.name ?? '—'}</small></strong><em>{bike.status}</em><ChevronRight size={14} /></button>)}
     {bicycles.length === 0 && <p className="empty-state">No bicycles found.</p>}
   </AdminPanel>
 }
@@ -337,7 +356,7 @@ function OwnershipChainScreen({ bicycle }: { bicycle: api.Bicycle | null }) {
     {bicycle && <>
       <div className="chain-card">
         <small>Current owner</small>
-        <strong>{currentOwner?.name ?? 'â€”'}</strong>
+        <strong>{currentOwner?.name ?? '—'}</strong>
         {currentOwner && <dl className="chain-owner-details">
           {currentOwner.nationalId && <><dt>National ID</dt><dd>{currentOwner.nationalId}</dd></>}
           {currentOwner.phone && <><dt>Phone</dt><dd>{currentOwner.phone}</dd></>}
@@ -347,14 +366,14 @@ function OwnershipChainScreen({ bicycle }: { bicycle: api.Bicycle | null }) {
         </dl>}
         <span>SN: {bicycle.frameNumber}</span>
       </div>
-      {registration && <div className="chain-event" key="reg"><span></span><strong>Registration Â· {new Date(registration.createdAt).toLocaleDateString()}<small>Owner: {registration.owner.name} Â· Recorded by {registration.recordingAgent.name}</small></strong></div>}
-      {transactions.map((t) => <div className="chain-event" key={t.id}><span></span><strong>{t.type === 'SALE' ? 'Sale' : 'Transfer'} Â· {new Date(t.transactionDate).toLocaleDateString()}<small>{t.seller?.name ?? 'â€”'} â†’ {t.buyer?.name ?? 'â€”'} Â· {t.transactionId}</small></strong></div>)}
+      {registration && <div className="chain-event" key="reg"><span></span><strong>Registration · {new Date(registration.createdAt).toLocaleDateString()}<small>Owner: {registration.owner.name} · Recorded by {registration.recordingAgent.name}</small></strong></div>}
+      {transactions.map((t) => <div className="chain-event" key={t.id}><span></span><strong>{t.type === 'SALE' ? 'Sale' : 'Transfer'} · {new Date(t.transactionDate).toLocaleDateString()}<small>{t.seller?.name ?? '—'} → {t.buyer?.name ?? '—'} · {t.transactionId}</small></strong></div>)}
       {transactions.length === 0 && !registration && <p className="empty-state">No chain history found.</p>}
     </> }
     {!bicycle && <p className="empty-state">No bicycle selected.</p>}
   </AdminPanel>
 }
-function RegistryProfileScreen({ onNavigate }: { onNavigate: (screen: Screen) => void }) { return <AdminPanel title="Registry Profile" kicker="MARCUS V. STERLING"><div className="registry-identity"><span className="profile-avatar">MV</span><strong>Verified registry owner<small>REG-99285-MV Â· Sector 4 Administrative District</small></strong></div><div className="inventory-summary"><strong>2<small>Currently owned</small></strong><strong className="rust-number">1<small>System flags</small></strong></div><button className="inventory-item" onClick={() => onNavigate('bicycle-inventory')}><Bike size={18} /><strong>Specialized Rockhopper Expert<small>SP-88218-Z2 Â· Active residence</small></strong><em>Registered</em></button><button className="inventory-item"><Bike size={18} /><strong>Cannondale Quick Disc 3<small>CN-11923-Q Â· Active residence</small></strong><em>Registered</em></button></AdminPanel> }
+function RegistryProfileScreen({ onNavigate }: { onNavigate: (screen: Screen) => void }) { return <AdminPanel title="Registry Profile" kicker="MARCUS V. STERLING"><div className="registry-identity"><span className="profile-avatar">MV</span><strong>Verified registry owner<small>REG-99285-MV · Sector 4 Administrative District</small></strong></div><div className="inventory-summary"><strong>2<small>Currently owned</small></strong><strong className="rust-number">1<small>System flags</small></strong></div><button className="inventory-item" onClick={() => onNavigate('bicycle-inventory')}><Bike size={18} /><strong>Specialized Rockhopper Expert<small>SP-88218-Z2 · Active residence</small></strong><em>Registered</em></button><button className="inventory-item"><Bike size={18} /><strong>Cannondale Quick Disc 3<small>CN-11923-Q · Active residence</small></strong><em>Registered</em></button></AdminPanel> }
 function AgentManagementScreen({ onNavigate, onSelectAgent }: { onNavigate: (screen: Screen) => void; onSelectAgent: (agent: api.Agent) => void }) {
   const [pendingRevoke, setPendingRevoke] = useState<string | null>(null)
   const [q, setQ] = useState('')
@@ -369,7 +388,7 @@ function AgentManagementScreen({ onNavigate, onSelectAgent }: { onNavigate: (scr
     {filtered.map((agent) => <div className="agent-item" key={agent.id}>
       <button className="agent-main" onClick={() => onSelectAgent(agent)}>
         <span className="profile-avatar">{agent.name.split(' ').map((p) => p[0]).join('').slice(0,2)}</span>
-        <strong>{agent.name}<small>{agent.isActive ? 'ACTIVE' : 'REVOKED'} Â· {agent._count.transactions} records</small></strong>
+        <strong>{agent.name}<small>{agent.isActive ? 'ACTIVE' : 'REVOKED'} · {agent._count.transactions} records</small></strong>
         <ChevronRight size={14} />
       </button>
       {agent.isActive && <button className="delete-agent" onClick={() => setPendingRevoke(agent.id)} aria-label={`Revoke ${agent.name}`}><Trash2 size={14} /></button>}
@@ -433,14 +452,14 @@ function AgentTerminalScreen({ agent, onNavigate }: { agent: api.Agent | null; o
     { key: 'canOverride', name: 'Remote override', copy: 'Grant power to review suspicious assets' },
   ]
   const initials = agent ? agent.name.split(' ').map((p) => p[0]).join('').slice(0, 2) : '??'
-  return <AdminPanel title="Agent Terminal" kicker={agent ? `${agent.name.toUpperCase()} Â· ${agent.isActive ? 'ACTIVE' : 'REVOKED'}` : 'AGENT DETAILS'}>
+  return <AdminPanel title="Agent Terminal" kicker={agent ? `${agent.name.toUpperCase()} · ${agent.isActive ? 'ACTIVE' : 'REVOKED'}` : 'AGENT DETAILS'}>
     <div className="registry-identity">
       <span className="profile-avatar">{initials}</span>
-      <span><strong>{agent?.name ?? 'â€”'}</strong><small>{agent?.email ?? 'â€”'}</small></span>
+      <span><strong>{agent?.name ?? '—'}</strong><small>{agent?.email ?? '—'}</small></span>
     </div>
     {agent && <div className="admin-info">
       <h2>Agent details</h2>
-      <p>Phone: {agent.phone ?? 'â€”'}</p>
+      <p>Phone: {agent.phone ?? '—'}</p>
       <p>Status: {agent.isActive ? 'Active' : 'Revoked'}</p>
       <p>Transactions recorded: {agent._count.transactions}</p>
       <p>Member since: {new Date(agent.createdAt).toLocaleDateString()}</p>
@@ -470,7 +489,7 @@ function ReportsExportsScreen({ onNavigate }: { onNavigate: (screen: Screen) => 
     finally { setBusy(null) }
   }
   const reports: { key: string; label: string; sub: string; params: Parameters<typeof api.downloadTransactionsXlsx>[0] }[] = [
-    { key: 'all', label: 'Transaction audit log', sub: 'All transactions â€” full history', params: {} },
+    { key: 'all', label: 'Transaction audit log', sub: 'All transactions — full history', params: {} },
     { key: 'sales', label: 'Sales report', sub: 'SALE type transactions only', params: { type: 'SALE' } },
     { key: 'transfers', label: 'Transfers report', sub: 'TRANSFER type transactions only', params: { type: 'TRANSFER' } },
     { key: 'flagged', label: 'Flagged incident summary', sub: 'All flagged and conflicted records', params: { flagStatus: 'FLAGGED' } },
@@ -513,7 +532,7 @@ function TransactionFlow({ step, setStep, saved, onSave, onCancel, onViewOwner }
         setSerialOwner(null); setSerialFound(false)
       }
     } catch {
-      // offline â€” fall back to Dexie cache
+      // offline — fall back to Dexie cache
       const cachedBicycle = (await db.cachedBicycles.toArray()).find((r) => ((r.data as { frameNumber?: string }).frameNumber ?? '').toLowerCase() === normalized.toLowerCase())
       const cachedOwnerId = cachedBicycle ? (cachedBicycle.data as { currentOwnerId?: string }).currentOwnerId : undefined
       const cachedOwner = cachedOwnerId ? (await db.cachedPeople.get(cachedOwnerId))?.data as PersonRecord | undefined : undefined
@@ -538,7 +557,7 @@ function TransactionFlow({ step, setStep, saved, onSave, onCancel, onViewOwner }
       }
       await db.pendingTransactions.put({ id: clientOperationId, payload, createdAt: Date.now() })
     } catch {
-      // offline â€” store _raw natural keys, server resolves IDs on sync
+      // offline — store _raw natural keys, server resolves IDs on sync
       await db.pendingTransactions.put({
         id: clientOperationId,
         payload: { _raw: { type: draft.type, bicycle: { frameNumber: draft.frameNumber, brand: draft.bicycleBrand, model: draft.bicycleModel, color: draft.bicycleColor, distinguishingFeatures: draft.distinguishingFeatures }, seller: draft.sellerNationalId.trim() ? { name: draft.sellerName, nationalId: draft.sellerNationalId, phone: draft.sellerPhone, cell: draft.sellerCell, sector: draft.sellerSector, village: draft.sellerVillage } : undefined, buyer: { name: draft.buyerName, nationalId: draft.buyerNationalId, phone: draft.buyerPhone, cell: draft.buyerCell, sector: draft.buyerSector, village: draft.buyerVillage }, price: draft.type === 'SALE' ? Number(draft.bicyclePrice) : undefined, serviceFee: Number(draft.serviceFee) || undefined, reason: draft.reason || undefined } },
@@ -562,7 +581,7 @@ function TransactionFlow({ step, setStep, saved, onSave, onCancel, onViewOwner }
 }
 
 function ChoiceStep({ type, onTypeChange }: { type: TransactionDraft['type']; onTypeChange: (type: TransactionDraft['type']) => void }) { const options: [TransactionDraft['type'], string, string, typeof FileText][] = [['SALE', 'Sell', 'Record a sale and permanent change of ownership', FileText], ['TRANSFER', 'Ownership transfer', 'Transfer ownership without a sale price', MapPin]]; return <div className="flow-body"><h2>Select transaction type</h2><p>Choose the record type for this field operation. Both flows verify the people involved by national ID.</p>{options.map(([value, title, copy, Icon]) => <button className={`choice-card ${type === value ? 'selected-choice' : ''}`} key={value} onClick={() => onTypeChange(value)}><span><Icon size={19} /></span><b>{title}</b><small>{copy}</small><ChevronRight /></button>)}</div> }
-function SerialStep({ value, onChange, checked, found, owner, confirmed, onVerify, onConfirm, onUse, onViewOwner }: { value: string; onChange: (value: string) => void; checked: boolean; found: boolean; owner: PersonRecord | null; confirmed: boolean; onVerify: () => void; onConfirm: () => void; onUse: () => void; onViewOwner: (person: PersonRecord) => void }) { return <div className="flow-body"><h2>Verify serial number</h2><p>Check the local database before creating a bicycle record.</p><label>Frame serial number<div className="serial-input"><QrCode size={16} /><input value={value} onChange={(event) => onChange(event.target.value)} placeholder="E.G. AB12345678" /><Smartphone size={16} /></div></label><button className="secondary-button" onClick={() => void onVerify()}><Search size={15} /> Verify database</button>{checked && found && <div className="duplicate-warning"><ShieldAlert size={17} /><span><strong>Duplicate bicycle found</strong><small>This serial is already linked to an owner. Resolve the issue before continuing.</small>{owner && <><button className="owner-details-link" onClick={() => onViewOwner(owner)}>View owner details <ArrowRight size={12} /></button><div className="owner-details"><b>{owner.name}</b><small>{owner.nationalId} Â· {owner.phone}</small><small>{owner.sector} Â· {owner.village}</small></div></>}</span><div className="duplicate-actions">{confirmed ? <Check className="confirmation-check" size={17} /> : <button className="confirm-warning" onClick={onConfirm}>Issue resolved</button>}<button className="use-bicycle-btn" onClick={onUse}>Use this bicycle <ArrowRight size={12} /></button></div></div>}{checked && !found && <div className="verification-result not-found"><Check size={15} /><span><strong>Serial available</strong><small>No bicycle record was found. Continue to capture the bicycle.</small></span></div>}<p className="section-label">Common serial locations</p><div className="location-grid"><span>Bottom bracket<b>Under pedals</b></span><span>Head tube<b>Front of frame</b></span><span>Seat tube<b>Near saddle</b></span><span>Rear dropout<b>Back wheel hub</b></span></div></div> }
+function SerialStep({ value, onChange, checked, found, owner, confirmed, onVerify, onConfirm, onUse, onViewOwner }: { value: string; onChange: (value: string) => void; checked: boolean; found: boolean; owner: PersonRecord | null; confirmed: boolean; onVerify: () => void; onConfirm: () => void; onUse: () => void; onViewOwner: (person: PersonRecord) => void }) { return <div className="flow-body"><h2>Verify serial number</h2><p>Check the local database before creating a bicycle record.</p><label>Frame serial number<div className="serial-input"><QrCode size={16} /><input value={value} onChange={(event) => onChange(event.target.value)} placeholder="E.G. AB12345678" /><Smartphone size={16} /></div></label><button className="secondary-button" onClick={() => void onVerify()}><Search size={15} /> Verify database</button>{checked && found && <div className="duplicate-warning"><ShieldAlert size={17} /><span><strong>Duplicate bicycle found</strong><small>This serial is already linked to an owner. Resolve the issue before continuing.</small>{owner && <><button className="owner-details-link" onClick={() => onViewOwner(owner)}>View owner details <ArrowRight size={12} /></button><div className="owner-details"><b>{owner.name}</b><small>{owner.nationalId} · {owner.phone}</small><small>{owner.sector} · {owner.village}</small></div></>}</span><div className="duplicate-actions">{confirmed ? <Check className="confirmation-check" size={17} /> : <button className="confirm-warning" onClick={onConfirm}>Issue resolved</button>}<button className="use-bicycle-btn" onClick={onUse}>Use this bicycle <ArrowRight size={12} /></button></div></div>}{checked && !found && <div className="verification-result not-found"><Check size={15} /><span><strong>Serial available</strong><small>No bicycle record was found. Continue to capture the bicycle.</small></span></div>}<p className="section-label">Common serial locations</p><div className="location-grid"><span>Bottom bracket<b>Under pedals</b></span><span>Head tube<b>Front of frame</b></span><span>Seat tube<b>Near saddle</b></span><span>Rear dropout<b>Back wheel hub</b></span></div></div> }
 function BicycleCaptureStep({ draft, update }: { draft: TransactionDraft; update: <K extends keyof TransactionDraft>(key: K, value: TransactionDraft[K]) => void }) { return <div className="flow-body"><h2>Record the bicycle</h2><p>This frame is new to the database. Capture its identifying details before recording the parties.</p><div className="capture-summary"><span>Frame serial<strong>{draft.frameNumber || 'Not entered'}</strong></span><span className="not-found-label">New bicycle record</span></div><div className="two-fields"><label>Brand<input value={draft.bicycleBrand} onChange={(event) => update('bicycleBrand', event.target.value)} placeholder="e.g. Trek" /></label><label>Model<input value={draft.bicycleModel} onChange={(event) => update('bicycleModel', event.target.value)} placeholder="e.g. Marlin 7" /></label></div><div className="two-fields"><label>Color<input value={draft.bicycleColor} onChange={(event) => update('bicycleColor', event.target.value)} placeholder="e.g. black" /></label><label>Photo reference<input placeholder="Optional photo ID" /></label></div><label>Distinguishing features<textarea value={draft.distinguishingFeatures} onChange={(event) => update('distinguishingFeatures', event.target.value)} placeholder="Scratches, markings, accessories" /></label></div> }
 function PartyStep({ draft, update }: { draft: TransactionDraft; update: <K extends keyof TransactionDraft>(key: K, value: TransactionDraft[K]) => void }) { return <div className="flow-body"><h2>Record both parties</h2><p>National ID is the primary identifier. Capture contact and local area details for each participant.</p><PartyFields label="Seller (outbound)" prefix="seller" draft={draft} update={update} /><PartyFields label="Buyer (inbound)" prefix="buyer" draft={draft} update={update} /><label>Reason for transfer or mismatch<textarea value={draft.reason} onChange={(event) => update('reason', event.target.value)} placeholder="Required when seller differs from current owner" /></label><div className="price-fields"><label>Bicycle price<input type="number" min="0" value={draft.bicyclePrice} onChange={(event) => update('bicyclePrice', event.target.value)} placeholder="0.00" /></label><label>Service fee<input type="number" min="0" value={draft.serviceFee} onChange={(event) => update('serviceFee', event.target.value)} /></label></div></div> }
 function PartyFields({ label, prefix, draft, update }: { label: string; prefix: 'seller' | 'buyer'; draft: TransactionDraft; update: <K extends keyof TransactionDraft>(key: K, value: TransactionDraft[K]) => void }) {
@@ -583,7 +602,7 @@ function PartyFields({ label, prefix, draft, update }: { label: string; prefix: 
       update(`${prefix}Village`, person.village ?? '')
       setLookupState('found')
     } catch {
-      // offline â€” fall back to Dexie cache
+      // offline — fall back to Dexie cache
       const cachedPerson = (await db.cachedPeople.toArray()).map((r) => r.data as PersonRecord).find((p) => p.nationalId?.toLowerCase() === nationalId.toLowerCase())
       if (!cachedPerson) { setLookupState('missing'); return }
       update(`${prefix}Name`, cachedPerson.name)
@@ -598,7 +617,7 @@ function PartyFields({ label, prefix, draft, update }: { label: string; prefix: 
   const status = lookupState === 'found' ? <div className="person-link-status found"><Check size={13} /> Existing person linked from database</div> : lookupState === 'missing' ? <div className="person-link-status missing"><UserRound size={13} /> Person not found. Complete the fields to create a new person.</div> : null
   return <fieldset className="party-fieldset"><legend>{label}</legend><div className="person-id-lookup"><label>National ID (16 characters)<input value={draft[`${prefix}NationalId`]} maxLength={16} onChange={(event) => { update(`${prefix}NationalId`, event.target.value); setLookupState('idle') }} placeholder="Enter 16-character national ID" /></label><button className="secondary-button" disabled={lookupState === 'checking' || draft[`${prefix}NationalId`].length !== 16} onClick={() => void lookup()}>{lookupState === 'checking' ? 'Checking...' : 'Look up person'}</button></div>{status}<label>Name<input value={draft[`${prefix}Name`]} readOnly={lookupState === 'found'} onChange={(event) => update(`${prefix}Name`, event.target.value)} placeholder="Full legal name" /></label><div className="two-fields"><label>Phone<input value={draft[`${prefix}Phone`]} readOnly={lookupState === 'found'} onChange={(event) => update(`${prefix}Phone`, event.target.value)} placeholder="Primary phone" /></label><label>Cell<input value={draft[`${prefix}Cell`]} readOnly={lookupState === 'found'} onChange={(event) => update(`${prefix}Cell`, event.target.value)} placeholder="Cell number" /></label></div><div className="two-fields"><label>Sector<input value={draft[`${prefix}Sector`]} readOnly={lookupState === 'found'} onChange={(event) => update(`${prefix}Sector`, event.target.value)} placeholder="Sector" /></label><label>Village<input value={draft[`${prefix}Village`]} readOnly={lookupState === 'found'} onChange={(event) => update(`${prefix}Village`, event.target.value)} placeholder="Village" /></label></div></fieldset>
 }
-function ReviewStep({ draft, total, onPrint }: { draft: TransactionDraft; total: number; onPrint: () => void }) { return <div className="flow-body"><h2>Review transaction</h2><p>Check the record before saving. The PDF is formatted for printing and contains the transaction summary.</p><div className="review-summary"><span>Transaction type<strong>{draft.type === 'SALE' ? 'Ownership transfer / sale' : 'Ownership transfer'}</strong></span><span>Bicycle<strong>{draft.bicycleBrand || 'New'} {draft.bicycleModel || 'record'} Â· {draft.frameNumber || 'No serial'}</strong></span><span>Seller and buyer<strong>{draft.sellerName || 'Seller pending'} â†’ {draft.buyerName || 'Buyer pending'}</strong></span><span>Amounts<strong>Bicycle {draft.bicyclePrice || '0.00'} + service {draft.serviceFee || '0.00'} = {total.toFixed(2)}</strong></span></div><button className="secondary-button print-button" onClick={onPrint}><FileText size={15} /> Preview / print transaction PDF</button><div className="audit-note"><ShieldCheck size={15} /> This action will be added to the audit log.</div></div> }
+function ReviewStep({ draft, total, onPrint }: { draft: TransactionDraft; total: number; onPrint: () => void }) { return <div className="flow-body"><h2>Review transaction</h2><p>Check the record before saving. The PDF is formatted for printing and contains the transaction summary.</p><div className="review-summary"><span>Transaction type<strong>{draft.type === 'SALE' ? 'Ownership transfer / sale' : 'Ownership transfer'}</strong></span><span>Bicycle<strong>{draft.bicycleBrand || 'New'} {draft.bicycleModel || 'record'} · {draft.frameNumber || 'No serial'}</strong></span><span>Seller and buyer<strong>{draft.sellerName || 'Seller pending'} → {draft.buyerName || 'Buyer pending'}</strong></span><span>Amounts<strong>Bicycle {draft.bicyclePrice || '0.00'} + service {draft.serviceFee || '0.00'} = {total.toFixed(2)}</strong></span></div><button className="secondary-button print-button" onClick={onPrint}><FileText size={15} /> Preview / print transaction PDF</button><div className="audit-note"><ShieldCheck size={15} /> This action will be added to the audit log.</div></div> }
 
 type RegistrationDraft = { frameNumber: string; brand: string; model: string; color: string; features: string; person: PersonRecord | null }
 type RegistrationPhase = 'serial' | 'bicycle' | 'person-search' | 'person-new' | 'review'
@@ -654,7 +673,7 @@ function RegisterScreen({ saved, onSave, onCancel, onViewOwner }: { saved: boole
       ])
       await db.pendingRegistrations.put({ id: clientOperationId, payload: { bicycleId: bicycle.id, ownerId: person.id }, createdAt: Date.now() })
     } catch {
-      // offline â€” store _raw natural keys, server resolves IDs on sync
+      // offline — store _raw natural keys, server resolves IDs on sync
       await db.pendingRegistrations.put({
         id: clientOperationId,
         payload: { _raw: { bicycle: { frameNumber: draft.frameNumber, brand: draft.brand, model: draft.model, color: draft.color, distinguishingFeatures: draft.features }, person: { name: draft.person.name, nationalId: draft.person.nationalId, phone: draft.person.phone, cell: draft.person.cell, sector: draft.person.sector, village: draft.person.village } } },
@@ -668,11 +687,11 @@ function RegisterScreen({ saved, onSave, onCancel, onViewOwner }: { saved: boole
   const steps = ['Serial', 'Bicycle', 'Person', 'Review', 'Done']
   const person = draft.person
   return <section className="flow-screen"><div className="stepper">{steps.map((label, index) => <span key={label} className={index <= (phase === 'serial' ? 0 : phase === 'bicycle' ? 1 : phase === 'person-search' || phase === 'person-new' ? 2 : 3) ? 'current' : ''}><i>{index + 1}</i><small>{label}</small></span>)}</div>
-    {phase === 'serial' && <div className="flow-body"><h2>Verify bicycle serial</h2><p>Check the database before creating a registration. A bicycle serial can only be registered once.</p><label>Frame serial number<div className="serial-input"><QrCode size={16} /><input value={draft.frameNumber} onChange={(event) => { updateBicycle('frameNumber', event.target.value); setSerialChecked(false); setSerialOwner(null); setSerialConfirmed(false) }} placeholder="E.G. ABT-2024-00918" /><Smartphone size={16} /></div></label><button className="secondary-button" onClick={() => void verifySerial()}><Search size={15} /> Check bicycle database</button>{serialChecked && serialOwner && <div className="duplicate-warning"><ShieldAlert size={17} /><span><strong>Serial already registered</strong><small>This bicycle is linked to {serialOwner.name}. Resolve this issue before continuing.</small><button className="owner-details-link" onClick={() => onViewOwner(serialOwner)}>View owner details <ArrowRight size={12} /></button><div className="owner-details"><b>{serialOwner.name}</b><small>{serialOwner.nationalId} Â· {serialOwner.phone}</small><small>{serialOwner.sector} Â· {serialOwner.village}</small></div></span><div className="duplicate-actions">{serialConfirmed ? <Check className="confirmation-check" size={17} /> : <button className="confirm-warning" onClick={() => setSerialConfirmed(true)}>Issue resolved</button>}<button className="use-bicycle-btn" onClick={() => setPhase('person-search')}>Use this bicycle <ArrowRight size={12} /></button></div></div>}{serialChecked && !serialOwner && <div className="verification-result not-found"><Check size={15} /><span><strong>Serial available</strong><small>No bicycle record was found. Continue to capture the bicycle.</small></span></div>}</div>}
+    {phase === 'serial' && <div className="flow-body"><h2>Verify bicycle serial</h2><p>Check the database before creating a registration. A bicycle serial can only be registered once.</p><label>Frame serial number<div className="serial-input"><QrCode size={16} /><input value={draft.frameNumber} onChange={(event) => { updateBicycle('frameNumber', event.target.value); setSerialChecked(false); setSerialOwner(null); setSerialConfirmed(false) }} placeholder="E.G. ABT-2024-00918" /><Smartphone size={16} /></div></label><button className="secondary-button" onClick={() => void verifySerial()}><Search size={15} /> Check bicycle database</button>{serialChecked && serialOwner && <div className="duplicate-warning"><ShieldAlert size={17} /><span><strong>Serial already registered</strong><small>This bicycle is linked to {serialOwner.name}. Resolve this issue before continuing.</small><button className="owner-details-link" onClick={() => onViewOwner(serialOwner)}>View owner details <ArrowRight size={12} /></button><div className="owner-details"><b>{serialOwner.name}</b><small>{serialOwner.nationalId} · {serialOwner.phone}</small><small>{serialOwner.sector} · {serialOwner.village}</small></div></span><div className="duplicate-actions">{serialConfirmed ? <Check className="confirmation-check" size={17} /> : <button className="confirm-warning" onClick={() => setSerialConfirmed(true)}>Issue resolved</button>}<button className="use-bicycle-btn" onClick={() => setPhase('person-search')}>Use this bicycle <ArrowRight size={12} /></button></div></div>}{serialChecked && !serialOwner && <div className="verification-result not-found"><Check size={15} /><span><strong>Serial available</strong><small>No bicycle record was found. Continue to capture the bicycle.</small></span></div>}</div>}
     {phase === 'bicycle' && <div className="flow-body"><h2>Record bicycle details</h2><p>This serial is new. Capture the bicycle before linking its current owner.</p><div className="capture-summary"><span>Frame serial<strong>{draft.frameNumber}</strong></span><span className="not-found-label">Available to register</span></div><div className="two-fields"><label>Brand<input value={draft.brand} onChange={(event) => updateBicycle('brand', event.target.value)} placeholder="e.g. Trek" /></label><label>Model<input value={draft.model} onChange={(event) => updateBicycle('model', event.target.value)} placeholder="e.g. Marlin 7" /></label></div><div className="two-fields"><label>Color<input value={draft.color} onChange={(event) => updateBicycle('color', event.target.value)} placeholder="e.g. black" /></label><label>Photo reference<input placeholder="Optional photo ID" /></label></div><label>Distinguishing features<textarea value={draft.features} onChange={(event) => updateBicycle('features', event.target.value)} placeholder="Scratches, markings, accessories" /></label></div>}
-    {phase === 'person-search' && <div className="flow-body"><h2>Find current owner</h2><p>Search by name or national ID. National ID is the primary person identifier.</p><label>Name or national ID<div className="search-field"><Search size={15} /><input value={personQuery} onChange={(event) => setPersonQuery(event.target.value)} placeholder="Search person in database" /></div></label><button className="secondary-button" onClick={findPerson}><Search size={15} /> Find person</button>{personChecked && person && <div className="person-found"><Check size={16} /><span><strong>{person.name}</strong><small>{person.nationalId} Â· {person.phone}</small><small>{person.sector} Â· {person.village}</small></span></div>}{personChecked && !person && <div className="person-not-found"><UserRound size={16} /><span><strong>Person not found</strong><small>No person matches this search. Add the owner to the database.</small></span><button onClick={() => setPhase('person-new')}>Add new person <ArrowRight size={14} /></button></div>}</div>}
+    {phase === 'person-search' && <div className="flow-body"><h2>Find current owner</h2><p>Search by name or national ID. National ID is the primary person identifier.</p><label>Name or national ID<div className="search-field"><Search size={15} /><input value={personQuery} onChange={(event) => setPersonQuery(event.target.value)} placeholder="Search person in database" /></div></label><button className="secondary-button" onClick={findPerson}><Search size={15} /> Find person</button>{personChecked && person && <div className="person-found"><Check size={16} /><span><strong>{person.name}</strong><small>{person.nationalId} · {person.phone}</small><small>{person.sector} · {person.village}</small></span></div>}{personChecked && !person && <div className="person-not-found"><UserRound size={16} /><span><strong>Person not found</strong><small>No person matches this search. Add the owner to the database.</small></span><button onClick={() => setPhase('person-new')}>Add new person <ArrowRight size={14} /></button></div>}</div>}
     {phase === 'person-new' && <div className="flow-body"><h2>Add person to database</h2><p>Create the owner record first, then it will be linked to this bicycle registration.</p><label>Full name<input value={newPerson.name} onChange={(event) => updatePerson('name', event.target.value)} placeholder="Full legal name" /></label><label>National ID (16 characters)<input value={newPerson.nationalId} maxLength={16} onChange={(event) => updatePerson('nationalId', event.target.value)} placeholder="Enter 16-character national ID" /></label><div className="two-fields"><label>Phone<input value={newPerson.phone} onChange={(event) => updatePerson('phone', event.target.value)} placeholder="Primary phone" /></label><label>Cell<input value={newPerson.cell} onChange={(event) => updatePerson('cell', event.target.value)} placeholder="Cell number" /></label></div><div className="two-fields"><label>Sector<input value={newPerson.sector} onChange={(event) => updatePerson('sector', event.target.value)} placeholder="Sector" /></label><label>Village<input value={newPerson.village} onChange={(event) => updatePerson('village', event.target.value)} placeholder="Village" /></label></div></div>}
-    {phase === 'review' && <div className="flow-body"><h2>Review registration</h2><p>Confirm the bicycle and its linked current owner before saving.</p><div className="review-summary"><span>Bicycle<strong>{draft.brand || 'New'} {draft.model || 'bicycle'} Â· {draft.frameNumber}</strong></span><span>Owner<strong>{person?.name}</strong></span><span>National ID<strong>{person?.nationalId}</strong></span><span>Location<strong>{person?.sector} Â· {person?.village}</strong></span></div><div className="audit-note"><ShieldCheck size={15} /> Registration and owner link will be audited.</div></div>}
+    {phase === 'review' && <div className="flow-body"><h2>Review registration</h2><p>Confirm the bicycle and its linked current owner before saving.</p><div className="review-summary"><span>Bicycle<strong>{draft.brand || 'New'} {draft.model || 'bicycle'} · {draft.frameNumber}</strong></span><span>Owner<strong>{person?.name}</strong></span><span>National ID<strong>{person?.nationalId}</strong></span><span>Location<strong>{person?.sector} · {person?.village}</strong></span></div><div className="audit-note"><ShieldCheck size={15} /> Registration and owner link will be audited.</div></div>}
     <div className="flow-actions"><button className="quiet-button" onClick={phase === 'serial' ? onCancel : () => setPhase(phase === 'person-new' ? 'person-search' : phase === 'review' ? 'person-search' : phase === 'person-search' ? 'bicycle' : 'serial')}>Back</button><button className="action-button" disabled={(phase === 'serial' && (!serialChecked || (Boolean(serialOwner) && !serialConfirmed))) || (phase === 'person-search' && !person) || (phase === 'person-new' && (!newPerson.name || newPerson.nationalId.length !== 16)) || isSaving} onClick={() => { if (phase === 'serial') setPhase(serialOwner ? 'person-search' : 'bicycle'); else if (phase === 'bicycle') setPhase('person-search'); else if (phase === 'person-search') setPhase('review'); else if (phase === 'person-new') { setDraft((current) => ({ ...current, person: { id: `person-${newPerson.nationalId}`, ...newPerson } })); setPhase('review') } else void saveRegistration() }}>{isSaving ? 'Saving...' : phase === 'review' ? 'Save registration' : 'Continue'} <ArrowRight size={15} /></button></div>
   </section>
 }
@@ -700,7 +719,7 @@ function SearchScreen({ query, setQuery, onSelect }: { query: string; setQuery: 
     initialPageParam: 1,
   })
   const bicycles = data?.pages.flatMap((p) => p.data) ?? []
-  const toRecord = (b: api.Bicycle): BicycleRecord => ({ id: b.id, frameNumber: b.frameNumber, name: `${b.brand ?? ''} ${b.model ?? ''}`.trim() || b.frameNumber, type: 'Bicycle', color: b.color ?? 'â€”', owner: b.currentOwner?.name ?? 'â€”', location: 'â€”', status: b.status === 'ACTIVE' ? 'Verified' : 'Needs review', date: '' })
+  const toRecord = (b: api.Bicycle): BicycleRecord => ({ id: b.id, frameNumber: b.frameNumber, name: `${b.brand ?? ''} ${b.model ?? ''}`.trim() || b.frameNumber, type: 'Bicycle', color: b.color ?? '—', owner: b.currentOwner?.name ?? '—', location: '—', status: b.status === 'ACTIVE' ? 'Verified' : 'Needs review', date: '' })
   return <section className="search-screen">
     <div className="search-field"><Search size={16} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search Name, Frame, or Brand..." /></div>
     <div className="admin-filters">{(['last30', 'specific', 'range', 'all'] as DateFilter[]).map((f) => <button key={f} className={dateFilter === f ? 'selected' : ''} onClick={() => setDateFilter(f)}>{f === 'last30' ? 'Last 30 days' : f === 'specific' ? 'Specific date' : f === 'range' ? 'Date range' : 'All time'}</button>)}</div>
@@ -708,7 +727,7 @@ function SearchScreen({ query, setQuery, onSelect }: { query: string; setQuery: 
     {dateFilter === 'range' && <div className="date-inputs"><input type="date" value={rangeFrom} onChange={(e) => setRangeFrom(e.target.value)} /><input type="date" value={rangeTo} onChange={(e) => setRangeTo(e.target.value)} /></div>}
     <p className="result-count">Results: {bicycles.length} found</p>
     {isLoading && <p className="empty-state">Loading...</p>}
-    {bicycles.map((b) => { const record = toRecord(b); return <button className="search-record" key={b.id} onClick={() => onSelect(record)}><span className="record-image"><Bike size={28} /></span><span><strong>{record.name}</strong><small>{record.type} Â· {record.color}</small><small>âŒ• {record.frameNumber}</small><em className={record.status === 'Verified' ? 'verified' : 'flagged'}>{record.status}</em></span><ChevronRight size={16} /></button>})}
+    {bicycles.map((b) => { const record = toRecord(b); return <button className="search-record" key={b.id} onClick={() => onSelect(record)}><span className="record-image"><Bike size={28} /></span><span><strong>{record.name}</strong><small>{record.type} · {record.color}</small><small>⌕ {record.frameNumber}</small><em className={record.status === 'Verified' ? 'verified' : 'flagged'}>{record.status}</em></span><ChevronRight size={16} /></button>})}
     {!isLoading && bicycles.length === 0 && <p className="empty-state">No records found.</p>}
     {hasNextPage && <button className="secondary-button load-button" disabled={isFetchingNextPage} onClick={() => void fetchNextPage()}><Cloud size={14} /> {isFetchingNextPage ? 'Loading...' : 'Load more'}</button>}
   </section>
@@ -736,17 +755,17 @@ function DetailsScreen({ record }: { record: BicycleRecord }) {
   const lastTx = txData?.data?.[0]
   const registration = regData?.data?.[0]
   return <section className="details-screen">
-    <div className="detail-heading"><span><small>Frame serial</small><strong>{record.frameNumber}</strong></span><em className={record.status === 'Verified' ? 'verified' : 'flagged'}>â—‰ {record.status}</em></div>
+    <div className="detail-heading"><span><small>Frame serial</small><strong>{record.frameNumber}</strong></span><em className={record.status === 'Verified' ? 'verified' : 'flagged'}>◉ {record.status}</em></div>
     {isLoading && <p className="empty-state">Loading...</p>}
-    <div className="asset-card"><div className="asset-image"><Bike size={52} /><span>Bicycle asset</span></div><div><small>Brand / Model</small><strong>{bike?.brand ?? 'â€”'} {bike?.model ?? ''}</strong></div><div><small>Frame color</small><strong>{bike?.color ?? record.color}</strong></div><div><small>Current owner</small><strong>{bike?.currentOwner?.name ?? record.owner}</strong></div></div>
-    {lastTx && <><p className="detail-date"><CalendarDays size={13} /> {new Date(lastTx.transactionDate).toLocaleString()}</p><div className="parties-card"><h2><ArrowRight size={15} /> Last transaction Â· {lastTx.transactionId}</h2>
-      <div><small>Seller (outbound)</small><strong>{lastTx.seller?.name ?? 'â€”'}</strong>{lastTx.seller && <PersonExpandable person={lastTx.seller} />}</div>
-      <div><small>Buyer (inbound)</small><strong>{lastTx.buyer?.name ?? 'â€”'}</strong>{lastTx.buyer && <PersonExpandable person={lastTx.buyer} />}</div>
+    <div className="asset-card"><div className="asset-image"><Bike size={52} /><span>Bicycle asset</span></div><div><small>Brand / Model</small><strong>{bike?.brand ?? '—'} {bike?.model ?? ''}</strong></div><div><small>Frame color</small><strong>{bike?.color ?? record.color}</strong></div><div><small>Current owner</small><strong>{bike?.currentOwner?.name ?? record.owner}</strong></div></div>
+    {lastTx && <><p className="detail-date"><CalendarDays size={13} /> {new Date(lastTx.transactionDate).toLocaleString()}</p><div className="parties-card"><h2><ArrowRight size={15} /> Last transaction · {lastTx.transactionId}</h2>
+      <div><small>Seller (outbound)</small><strong>{lastTx.seller?.name ?? '—'}</strong>{lastTx.seller && <PersonExpandable person={lastTx.seller} />}</div>
+      <div><small>Buyer (inbound)</small><strong>{lastTx.buyer?.name ?? '—'}</strong>{lastTx.buyer && <PersonExpandable person={lastTx.buyer} />}</div>
       <div><small>Recorded by</small><strong>{lastTx.recordingAgent.name}</strong></div></div></> }
     {!lastTx && registration && <><p className="detail-date"><CalendarDays size={13} /> Registered {new Date(registration.createdAt).toLocaleString()}</p><div className="parties-card"><h2><Bike size={15} /> Registration record</h2>
       <div><small>Owner</small><strong>{registration.owner.name}</strong><PersonExpandable person={registration.owner} /></div>
       <div><small>Recorded by</small><strong>{registration.recordingAgent.name}</strong></div></div></> }
-    <div className="location-card"><MapPin size={17} /><span><small>Status</small><strong>{bike?.status ?? 'â€”'}</strong></span></div>
+    <div className="location-card"><MapPin size={17} /><span><small>Status</small><strong>{bike?.status ?? '—'}</strong></span></div>
     <button className="action-button export-button"><Send size={14} /> Export certified record (PDF)</button>
   </section>
 }
@@ -765,8 +784,8 @@ function ActivityScreen({ onOpenDetails, onSelectTransaction }: { onOpenDetails:
     if (isOnline) return
     Promise.all([db.pendingTransactions.orderBy('createdAt').reverse().toArray(), db.pendingRegistrations.orderBy('createdAt').reverse().toArray()]).then(([txs, regs]) => {
       setOfflineItems([
-        ...txs.map((r) => { const p = r.payload as { type?: string; _raw?: { type?: string; bicycle?: { frameNumber?: string } } }; const type = p._raw?.type ?? p.type ?? 'TRANSACTION'; const frame = (p as { frameNumber?: string }).frameNumber ?? p._raw?.bicycle?.frameNumber ?? 'â€”'; return { key: r.id, date: r.createdAt, label: `Pending ${type}: ${frame}`, sub1: 'Queued offline â€” awaiting sync' } }),
-        ...regs.map((r) => { const p = r.payload as { _raw?: { bicycle?: { frameNumber?: string } }; bicycleId?: string }; const frame = p._raw?.bicycle?.frameNumber ?? p.bicycleId ?? 'â€”'; return { key: r.id, date: r.createdAt, label: `Pending registration: ${frame}`, sub1: 'Queued offline â€” awaiting sync' } }),
+        ...txs.map((r) => { const p = r.payload as { type?: string; _raw?: { type?: string; bicycle?: { frameNumber?: string } } }; const type = p._raw?.type ?? p.type ?? 'TRANSACTION'; const frame = (p as { frameNumber?: string }).frameNumber ?? p._raw?.bicycle?.frameNumber ?? '—'; return { key: r.id, date: r.createdAt, label: `Pending ${type}: ${frame}`, sub1: 'Queued offline — awaiting sync' } }),
+        ...regs.map((r) => { const p = r.payload as { _raw?: { bicycle?: { frameNumber?: string } }; bicycleId?: string }; const frame = p._raw?.bicycle?.frameNumber ?? p.bicycleId ?? '—'; return { key: r.id, date: r.createdAt, label: `Pending registration: ${frame}`, sub1: 'Queued offline — awaiting sync' } }),
       ].sort((a, b) => b.date - a.date))
     })
   }, [isOnline])
@@ -775,16 +794,16 @@ function ActivityScreen({ onOpenDetails, onSelectTransaction }: { onOpenDetails:
   const loading = isOnline && (txLoading || regLoading)
   type ActivityItem = { key: string; date: string; label: string; sub1: string; sub2: string; kind: 'registration' | 'sale' | 'transfer'; onPress: () => void }
   const allItems: ActivityItem[] = [
-    ...(txData?.pages.flatMap((p) => p.data) ?? []).map((t) => ({ key: t.id, date: t.transactionDate, kind: (t.type === 'SALE' ? 'sale' : 'transfer') as 'sale' | 'transfer', label: `${t.type === 'SALE' ? 'Sale' : 'Transfer'}: ${t.bicycle.brand ?? ''} ${t.bicycle.model ?? ''}`.trim(), sub1: `${t.seller?.name ?? 'â€”'} â†’ ${t.buyer?.name ?? 'â€”'}`, sub2: `# ${t.transactionId} Â· ${new Date(t.transactionDate).toLocaleString()}`, onPress: () => onSelectTransaction(t.id) })),
-    ...(regData?.pages.flatMap((p) => p.data) ?? []).map((r) => ({ key: r.id, date: r.createdAt, kind: 'registration' as const, label: `Registered: ${r.bicycle.brand ?? ''} ${r.bicycle.model ?? ''}`.trim(), sub1: `Owner: ${r.owner.name}`, sub2: `# ${r.bicycle.frameNumber} Â· ${new Date(r.createdAt).toLocaleString()}`, onPress: () => onOpenDetails(r.bicycle.id, r.bicycle.frameNumber) })),
+    ...(txData?.pages.flatMap((p) => p.data) ?? []).map((t) => ({ key: t.id, date: t.transactionDate, kind: (t.type === 'SALE' ? 'sale' : 'transfer') as 'sale' | 'transfer', label: `${t.type === 'SALE' ? 'Sale' : 'Transfer'}: ${t.bicycle.brand ?? ''} ${t.bicycle.model ?? ''}`.trim(), sub1: `${t.seller?.name ?? '—'} → ${t.buyer?.name ?? '—'}`, sub2: `# ${t.transactionId} · ${new Date(t.transactionDate).toLocaleString()}`, onPress: () => onSelectTransaction(t.id) })),
+    ...(regData?.pages.flatMap((p) => p.data) ?? []).map((r) => ({ key: r.id, date: r.createdAt, kind: 'registration' as const, label: `Registered: ${r.bicycle.brand ?? ''} ${r.bicycle.model ?? ''}`.trim(), sub1: `Owner: ${r.owner.name}`, sub2: `# ${r.bicycle.frameNumber} · ${new Date(r.createdAt).toLocaleString()}`, onPress: () => onOpenDetails(r.bicycle.id, r.bicycle.frameNumber) })),
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
   const onlineItems = filter === 'all' ? allItems : allItems.filter((i) => i.kind === filter)
   return <section className="activity-screen">
     <div className="admin-filters" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
       {(['all', 'registration', 'sale', 'transfer'] as const).map((f) => <button key={f} className={filter === f ? 'selected' : ''} onClick={() => setFilter(f)}>{f === 'all' ? 'All' : f === 'registration' ? 'Registered' : f === 'sale' ? 'Sales' : 'Transfers'}</button>)}
     </div>
-    <p className="date-divider">â–£ Recent Activity</p>
-    {!isOnline && <div className="offline-notice"><Database size={13} /> Offline â€” showing queued operations</div>}
+    <p className="date-divider">▣ Recent Activity</p>
+    {!isOnline && <div className="offline-notice"><Database size={13} /> Offline — showing queued operations</div>}
     {loading && <p className="empty-state">Loading...</p>}
     {isOnline && onlineItems.map((item) => <button className="activity-card" key={item.key} onClick={item.onPress}><span className="activity-mark"><ArrowRight size={16} /></span><span><strong>{item.label}</strong><small>{item.sub1}</small><small>{item.sub2}</small></span><ChevronRight size={16} /></button>)}
     {isOnline && (txHasMore || regHasMore) && <button className="secondary-button load-button" disabled={txFetching || regFetching} onClick={() => { if (txHasMore) void txNext(); if (regHasMore) void regNext() }}><Cloud size={14} /> {txFetching || regFetching ? 'Loading...' : 'Load more'}</button>}
@@ -829,7 +848,7 @@ function ProfileScreen({ user, role, fontSize, onChangeFontSize, onLogout }: { u
     try {
       const { flushPendingOperations } = await import('./lib/sync')
       const s = await flushPendingOperations()
-      setSyncResult(`Synced ${s.synced} Â· Conflicts ${s.conflicts} Â· Errors ${s.failed + s.validationErrors}`)
+      setSyncResult(`Synced ${s.synced} · Conflicts ${s.conflicts} · Errors ${s.failed + s.validationErrors}`)
       setPendingCount(0)
     } catch { setSyncResult('Sync failed. Check connectivity.') }
     finally { setSyncing(false) }
@@ -861,11 +880,12 @@ function ProfileScreen({ user, role, fontSize, onChangeFontSize, onLogout }: { u
 
   if (section === 'sync') return <section className="admin-panel">
     <p className="screen-kicker">SETTINGS</p><h1>Sync Status</h1>
-    <p style={{ margin: '8px 0 4px', fontSize: 13 }}>Pending operations: <strong>{pendingCount ?? 'â€¦'}</strong></p>
+    <p style={{ margin: '8px 0 4px', fontSize: 13 }}>Pending operations: <strong>{pendingCount ?? '…'}</strong></p>
     <p style={{ fontSize: 12, color: '#7f8d87', marginBottom: 12 }}>Operations queued offline that haven't synced yet.</p>
     {syncResult && <p style={{ fontSize: 13, margin: '4px 0 8px', color: '#4caf7d' }}>{syncResult}</p>}
     <button className="action-button" disabled={syncing || !navigator.onLine} onClick={() => void forceSync()}>{syncing ? 'Syncing...' : 'Sync now'}</button>
     {!navigator.onLine && <p style={{ fontSize: 12, color: '#e05', marginTop: 6 }}>You are offline.</p>}
+    <SyncErrorList />
     <button className="quiet-button" style={{ marginTop: 12 }} onClick={back}>Back to settings</button>
   </section>
 
@@ -880,7 +900,7 @@ function ProfileScreen({ user, role, fontSize, onChangeFontSize, onLogout }: { u
   return <section className="admin-panel">
     <p className="screen-kicker">{isAdmin ? 'ADMINISTRATOR' : 'FIELD AGENT'}</p>
     <h1>Profile & Settings</h1>
-    <div className="owner-modal-identity" style={{ marginBottom: 16 }}><span className="profile-avatar">{initials}</span><span><strong>{user?.name ?? mockUser.name}</strong><small>{isAdmin ? 'Administrator' : 'Field Agent'} Â· {user?.role ?? mockUser.role}</small></span></div>
+    <div className="owner-modal-identity" style={{ marginBottom: 16 }}><span className="profile-avatar">{initials}</span><span><strong>{user?.name ?? mockUser.name}</strong><small>{isAdmin ? 'Administrator' : 'Field Agent'} · {user?.role ?? mockUser.role}</small></span></div>
     <button className="settings-row" onClick={() => setSection('password')}><LockKeyhole size={17} /> Change password <ChevronRight size={15} /></button>
     <button className="settings-row" onClick={() => setSection('sync')}><Cloud size={17} /> Sync status <ChevronRight size={15} /></button>
     <button className="settings-row" onClick={() => setSection('cache')}><Database size={17} /> Clear local cache <ChevronRight size={15} /></button>
@@ -898,10 +918,32 @@ function ProfileScreen({ user, role, fontSize, onChangeFontSize, onLogout }: { u
     </div>
     <div className="settings-row" style={{ cursor: 'default', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
       <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Signal size={17} /> App info</span>
-      <small style={{ paddingLeft: 23, color: '#7f8d87' }}>v{import.meta.env.VITE_APP_VERSION ?? '1.0.0'} Â· API: {import.meta.env.VITE_API_URL ?? 'localhost:4000'}</small>
+      <small style={{ paddingLeft: 23, color: '#7f8d87' }}>v{import.meta.env.VITE_APP_VERSION ?? '1.0.0'} · API: {import.meta.env.VITE_API_URL ?? 'localhost:4000'}</small>
     </div>
     <button className="logout-button" style={{ marginTop: 16 }} onClick={onLogout}>End session &amp; secure logs <LockKeyhole size={15} /></button>
   </section>
+}
+
+function SyncErrorList() {
+  const [errors, setErrors] = useState<{ key: string; value: string }[]>([])
+  const load = () => db.syncMetadata.filter((m) => m.key.startsWith('error:') || m.key.startsWith('conflict:')).toArray().then((rows) => setErrors(rows.map((r) => ({ key: r.key, value: r.value }))))
+  useEffect(() => { void load() }, [])
+  if (errors.length === 0) return null
+  const dismiss = async (key: string) => {
+    const id = key.replace(/^(error|conflict):/, '')
+    await Promise.all([db.syncMetadata.delete(key), db.pendingTransactions.delete(id), db.pendingRegistrations.delete(id)])
+    void load()
+  }
+  return <div style={{ marginTop: 16 }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+      <p style={{ fontSize: 12, color: '#e05', margin: 0 }}>Failed operations ({errors.length}) — these will not retry automatically:</p>
+      <button onClick={() => void Promise.all(errors.map(({ key }) => dismiss(key)))} style={{ fontSize: 11, color: '#7f8d87', background: 'none', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}>Dismiss all ×</button>
+    </div>
+    {errors.map(({ key, value }) => <div key={key} style={{ fontSize: 12, background: 'rgba(238,0,85,0.08)', border: '1px solid rgba(238,0,85,0.25)', borderRadius: 6, padding: '8px 10px', marginBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+      <span style={{ color: '#e05', flex: 1 }}>{value}</span>
+      <button onClick={() => void dismiss(key)} style={{ fontSize: 11, color: '#7f8d87', background: 'none', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}>Dismiss ×</button>
+    </div>)}
+  </div>
 }
 
 function PeopleScreen({ onSelectPerson }: { onSelectPerson: (person: api.Person) => void }) {
@@ -922,7 +964,7 @@ function PersonSearchScreen({ onSelectPerson }: { onSelectPerson: (person: api.P
     {isLoading && <p className="empty-state">Loading...</p>}
     {people.map((p) => <button className="search-record" key={p.id} onClick={() => onSelectPerson(p)}>
       <span className="record-image"><UserRound size={28} /></span>
-      <span><strong>{p.name}</strong><small>ID: {p.nationalId}</small><small>{p.sector ?? 'â€”'} Â· {p.village ?? 'â€”'}</small></span>
+      <span><strong>{p.name}</strong><small>ID: {p.nationalId}</small><small>{p.sector ?? '—'} · {p.village ?? '—'}</small></span>
       <ChevronRight size={16} />
     </button>)}
     {!isLoading && people.length === 0 && <p className="empty-state">No people found.</p>}
@@ -936,12 +978,12 @@ function PersonActivityScreen({ person, onSelectTransaction, onOpenDetails }: { 
   const loading = txLoading || regLoading
   type ActivityItem = { key: string; date: string; label: string; sub1: string; sub2: string; onPress: () => void }
   const items: ActivityItem[] = [
-    ...(txData?.data ?? []).map((t) => ({ key: t.id, date: t.transactionDate, label: `${t.type === 'SALE' ? 'Sale' : 'Transfer'}: ${t.bicycle.brand ?? ''} ${t.bicycle.model ?? ''}`.trim(), sub1: `${t.seller?.name ?? 'â€”'} â†’ ${t.buyer?.name ?? 'â€”'}`, sub2: `# ${t.transactionId} Â· ${new Date(t.transactionDate).toLocaleString()}`, onPress: () => onSelectTransaction(t.id) })),
-    ...(regData?.data ?? []).map((r) => ({ key: r.id, date: r.createdAt, label: `Registered: ${r.bicycle.brand ?? ''} ${r.bicycle.model ?? ''}`.trim(), sub1: `Owner: ${r.owner.name}`, sub2: `# ${r.bicycle.frameNumber} Â· ${new Date(r.createdAt).toLocaleString()}`, onPress: () => onOpenDetails(r.bicycle.id, r.bicycle.frameNumber) })),
+    ...(txData?.data ?? []).map((t) => ({ key: t.id, date: t.transactionDate, label: `${t.type === 'SALE' ? 'Sale' : 'Transfer'}: ${t.bicycle.brand ?? ''} ${t.bicycle.model ?? ''}`.trim(), sub1: `${t.seller?.name ?? '—'} → ${t.buyer?.name ?? '—'}`, sub2: `# ${t.transactionId} · ${new Date(t.transactionDate).toLocaleString()}`, onPress: () => onSelectTransaction(t.id) })),
+    ...(regData?.data ?? []).map((r) => ({ key: r.id, date: r.createdAt, label: `Registered: ${r.bicycle.brand ?? ''} ${r.bicycle.model ?? ''}`.trim(), sub1: `Owner: ${r.owner.name}`, sub2: `# ${r.bicycle.frameNumber} · ${new Date(r.createdAt).toLocaleString()}`, onPress: () => onOpenDetails(r.bicycle.id, r.bicycle.frameNumber) })),
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
   return <section className="activity-screen">
     {person && <div className="registry-identity" style={{ marginBottom: 16 }}><span className="profile-avatar">{person.name.split(' ').map((p) => p[0]).join('').slice(0, 2)}</span><span><strong>{person.name}</strong><small>{person.nationalId}</small></span></div>}
-    <p className="date-divider">â–£ All Activity</p>
+    <p className="date-divider">▣ All Activity</p>
     {loading && <p className="empty-state">Loading...</p>}
     {items.map((item) => <button className="activity-card" key={item.key} onClick={item.onPress}><span className="activity-mark"><ArrowRight size={16} /></span><span><strong>{item.label}</strong><small>{item.sub1}</small><small>{item.sub2}</small></span><ChevronRight size={16} /></button>)}
     {!loading && items.length === 0 && <p className="empty-state">No activity found for this person.</p>}

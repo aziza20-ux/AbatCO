@@ -1,18 +1,18 @@
 import nodemailer from 'nodemailer'
 
 const transporter = nodemailer.createTransport({
-  host: 'smtp-relay.brevo.com',
-  port: 465,
-  secure: true,
+  host: process.env.EMAIL_HOST!,
+  port: Number(process.env.EMAIL_PORT),
+  secure: Number(process.env.EMAIL_PORT) === 465,
   auth: {
-    user: process.env.BREVO_SMTP_USER!,
-    pass: process.env.BREVO_SMTP_PASS!,
+    user: process.env.EMAIL_USER!,
+    pass: process.env.EMAIL_PASS!,
   },
 })
 
 export async function sendOtpEmail(toEmail: string, toName: string, otp: string) {
   await transporter.sendMail({
-    from: `"${process.env.BREVO_SENDER_NAME}" <${process.env.BREVO_SENDER_EMAIL}>`,
+    from: `"${process.env.EMAIL_USER}" <${process.env.EMAIL_USER}>`,
     to: `"${toName}" <${toEmail}>`,
     subject: 'Your password reset code',
     html: `

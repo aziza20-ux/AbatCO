@@ -53,6 +53,7 @@ model User {
   permissions  Json           @default("{\"canRegister\":true,\"canTransfer\":true}")
   resetOtp      String?
   resetOtpExpiry DateTime?
+  resetOtpSentAt DateTime?
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
 }
