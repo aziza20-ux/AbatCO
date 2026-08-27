@@ -9,6 +9,9 @@
     "start": "node dist/server.js",
     "test": "vitest run"
   },
+  "prisma": {
+    "schema": "../../prisma/schema.prisma"
+  },
   "dependencies": {
     "bcrypt": "^6.0.0",
     "cloudinary": "^2.10.1",
