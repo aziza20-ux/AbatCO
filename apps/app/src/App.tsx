@@ -84,7 +84,7 @@ export default function App() {
       {screen === 'admin-home' && <AdminHomeScreen onNavigate={go} onManageProfile={() => setShowProfile(true)} onSetRegisterOrigin={setRegisterOrigin} />}
       {screen === 'admin-transactions' && <AdminTransactionsScreen onNavigate={go} onSelectTransaction={(id) => { setSelectedTransactionId(id); setTransactionOrigin('admin-transactions') }} />}
       {screen === 'transaction-record' && <AdminRecordScreen transactionId={selectedTransactionId} onNavigate={go} />}
-      {screen === 'flagged-queue' && <FlaggedQueueScreen onNavigate={go} />}
+      {screen === 'flagged-queue' && <FlaggedQueueScreen onNavigate={go} onSelectTransaction={(id) => { setSelectedTransactionId(id); setTransactionOrigin('flagged-queue') }} />}
       {screen === 'bicycle-inventory' && <BicycleInventoryScreen onNavigate={go} onSelectBicycle={(bike) => { setSelectedOwnershipBicycle(bike); go('ownership-chain') }} />}
       {screen === 'ownership-chain' && <OwnershipChainScreen bicycle={selectedOwnershipBicycle} />}
       {screen === 'agent-management' && <AgentManagementScreen onNavigate={go} onSelectAgent={(a) => { setSelectedAgent(a); go('agent-terminal') }} />}
@@ -168,7 +168,8 @@ function AdminTransactionsScreen({ onNavigate, onSelectTransaction }: { onNaviga
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<string>('All')
   const flagStatus = filter === 'Flagged' ? 'FLAGGED' : undefined
-  const { data, isLoading: loading } = useQuery({ queryKey: ['transactions', query, flagStatus], queryFn: () => api.listTransactions({ q: query || undefined, flagStatus }) })
+  const type = filter === 'Sales' ? 'SALE' : filter === 'Transfers' ? 'TRANSFER' : undefined
+  const { data, isLoading: loading } = useQuery({ queryKey: ['transactions', query, filter], queryFn: () => api.listTransactions({ q: query || undefined, flagStatus, type }) })
   const transactions = data?.data ?? []
   return <section className="admin-transactions">
     <div className="admin-page-heading"><div><p className="screen-kicker">CONTROL MODULE</p><h1>All Transactions</h1><p>Network-wide historical record</p></div>
@@ -188,22 +189,73 @@ function AdminTransactionsScreen({ onNavigate, onSelectTransaction }: { onNaviga
 }
 
 function AdminRecordScreen({ transactionId, onNavigate }: { transactionId: string | null; onNavigate: (screen: Screen) => void }) {
+  const queryClient = useQueryClient()
   const { data, isLoading } = useQuery({ queryKey: ['transaction', transactionId], queryFn: () => api.getTransaction(transactionId!), enabled: !!transactionId })
+  const [note, setNote] = useState('')
+  const [noteOpen, setNoteOpen] = useState(false)
+  const { mutate: review, isPending } = useMutation({
+    mutationFn: (status: 'REVIEWED' | 'FLAGGED') => api.reviewTransaction(transactionId!, status, note || undefined),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['transaction', transactionId] }); queryClient.invalidateQueries({ queryKey: ['transactions'] }); setNoteOpen(false); setNote('') },
+  })
   const t = data?.data
   return <AdminPanel title="Transaction Record" kicker={t ? t.transactionId : 'LOADING...'}>
     {isLoading && <p className="empty-state">Loading...</p>}
     {t && <>
-      {t.flagStatus === 'FLAGGED' && <div className="admin-record-alert"><ShieldAlert size={14} /><strong>Resolution required</strong><small>{t.flagReason ?? 'Flagged record requires administrator review.'}</small></div>}
+      {(t.flagStatus === 'FLAGGED' || t.flagStatus === 'CONFLICTED') && <div className="admin-record-alert"><ShieldAlert size={14} /><strong>Resolution required</strong><small>{t.flagReason ?? 'Flagged record requires administrator review.'}</small></div>}
       <AdminInfo title="Transaction summary" rows={[`${t.type} · ${new Date(t.transactionDate).toLocaleString()}`, `${t.bicycle.brand ?? ''} ${t.bicycle.model ?? ''} · ${t.bicycle.frameNumber}`, `${t.seller?.name ?? '—'} → ${t.buyer?.name ?? '—'}`, `Recorded by ${t.recordingAgent.name}`]} />
-      <em className={t.flagStatus === 'NONE' ? 'verified' : 'flagged'} style={{ display: 'block', marginBottom: 12 }}>{t.flagStatus}</em>
+      <em className={t.flagStatus === 'NONE' || t.flagStatus === 'REVIEWED' ? 'verified' : 'flagged'} style={{ display: 'block', marginBottom: 12 }}>{t.flagStatus}</em>
+      {noteOpen && <label style={{ display: 'block', marginBottom: 8 }}>Admin note<textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional review note..." style={{ width: '100%', marginTop: 4 }} /></label>}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+        {t.flagStatus !== 'REVIEWED' && <button className="action-button" disabled={isPending} onClick={() => { setNoteOpen(true); review('REVIEWED') }}>{isPending ? 'Saving...' : <><Check size={13} /> Mark reviewed</>}</button>}
+        {t.flagStatus !== 'FLAGGED' && <button className="admin-wide-button" style={{ background: 'transparent', border: '1px solid #e05', color: '#e05' }} disabled={isPending} onClick={() => { setNoteOpen(true); review('FLAGGED') }}><Flag size={13} /> Flag</button>}
+        {!noteOpen && <button className="quiet-button" onClick={() => setNoteOpen((v) => !v)}>Add note</button>}
+      </div>
     </> }
     <button className="admin-wide-button" onClick={() => onNavigate('flagged-queue')}>Open flagged queue</button>
   </AdminPanel>
 }
-function FlaggedQueueScreen({ onNavigate }: { onNavigate: (screen: Screen) => void }) {
+function FlaggedQueueScreen({ onNavigate, onSelectTransaction }: { onNavigate: (screen: Screen) => void; onSelectTransaction: (id: string) => void }) {
+  const queryClient = useQueryClient()
+  const [tab, setTab] = useState<'flagged' | 'conflicts'>('flagged')
   const { data, isLoading: loading } = useQuery({ queryKey: ['transactions', '', 'FLAGGED'], queryFn: () => api.listTransactions({ flagStatus: 'FLAGGED' }) })
+  const { data: conflictsData, isLoading: conflictsLoading } = useQuery({ queryKey: ['conflicts'], queryFn: () => api.listConflicts() })
   const flagged = data?.data ?? []
-  return <AdminPanel title="Flagged Queue" kicker={`ACTIVE INCIDENTS · ${flagged.length}`}><div className="queue-metrics"><b>{flagged.length}<small>Flagged</small></b><b>0<small>Pending</small></b><b>0<small>Resolved</small></b></div>{loading && <p className="empty-state">Loading...</p>}{flagged.map((t) => <button className="incident-card" key={t.id} onClick={() => onNavigate('transaction-record')}><Flag size={14} /><strong>{t.bicycle.brand} {t.bicycle.model}<small>{t.flagReason ?? 'Flagged for review'}</small></strong><em>Review</em></button>)}{!loading && flagged.length === 0 && <p className="empty-state">No flagged transactions.</p>}</AdminPanel>
+  const conflicts = conflictsData?.data ?? []
+  const { mutate: resolve, isPending: resolving, variables: resolvingVars } = useMutation({
+    mutationFn: ({ id, resolution, note }: { id: string; resolution: 'ACCEPT' | 'REJECT'; note?: string }) => api.resolveConflict(id, resolution, note),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['conflicts'] }); queryClient.invalidateQueries({ queryKey: ['transactions'] }) },
+  })
+  return <AdminPanel title="Flagged Queue" kicker={`ACTIVE INCIDENTS · ${flagged.length + conflicts.length}`}>
+    <div className="admin-filters" style={{ marginBottom: 12 }}>
+      <button className={tab === 'flagged' ? 'selected' : ''} onClick={() => setTab('flagged')}>Flagged ({flagged.length})</button>
+      <button className={tab === 'conflicts' ? 'selected' : ''} onClick={() => setTab('conflicts')}>Conflicts ({conflicts.length})</button>
+    </div>
+    {tab === 'flagged' && <>
+      {loading && <p className="empty-state">Loading...</p>}
+      {flagged.map((t) => <button className="incident-card" key={t.id} onClick={() => { onSelectTransaction(t.id); onNavigate('transaction-record') }}>
+        <Flag size={14} /><strong>{t.bicycle.brand} {t.bicycle.model}<small>{t.flagReason ?? 'Flagged for review'}</small></strong><em>Review <ChevronRight size={12} /></em>
+      </button>)}
+      {!loading && flagged.length === 0 && <p className="empty-state">No flagged transactions.</p>}
+    </> }
+    {tab === 'conflicts' && <>
+      {conflictsLoading && <p className="empty-state">Loading...</p>}
+      {conflicts.map((c) => {
+        const busy = resolving && (resolvingVars as { id: string })?.id === c.id
+        return <div className="incident-card" key={c.id} style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
+            <ShieldAlert size={14} />
+            <strong style={{ flex: 1 }}>{c.entity}<small>{c.user.name} · {new Date(c.createdAt).toLocaleDateString()}</small></strong>
+          </div>
+          {c.conflictReason && <small style={{ color: '#e05' }}>{c.conflictReason}</small>}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="action-button" style={{ fontSize: 12, padding: '4px 10px' }} disabled={busy} onClick={() => resolve({ id: c.id, resolution: 'ACCEPT' })}>{busy ? '...' : <><Check size={12} /> Accept</>}</button>
+            <button className="quiet-button" style={{ fontSize: 12, padding: '4px 10px', color: '#e05' }} disabled={busy} onClick={() => resolve({ id: c.id, resolution: 'REJECT' })}>Reject</button>
+          </div>
+        </div>
+      })}
+      {!conflictsLoading && conflicts.length === 0 && <p className="empty-state">No pending conflicts.</p>}
+    </> }
+  </AdminPanel>
 }
 function BicycleInventoryScreen({ onNavigate, onSelectBicycle }: { onNavigate: (screen: Screen) => void; onSelectBicycle: (bike: api.Bicycle) => void }) {
   const [q, setQ] = useState('')
