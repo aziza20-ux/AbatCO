@@ -1,12 +1,12 @@
 ﻿import { useState, useEffect, type ReactNode } from 'react'
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from '@tanstack/react-query'
-import { Activity, ArrowLeft, ArrowRight, Bike, CalendarDays, Check, ChevronRight, Cloud, Database, Eye, FileText, Flag, Home, LockKeyhole, MapPin, Plus, QrCode, Search, Send, Settings, ShieldAlert, ShieldCheck, Signal, Smartphone, Trash2, TrendingUp, UserRound, Users, Wifi, X } from 'lucide-react'
+import { Activity, ArrowLeft, ArrowRight, Bike, CalendarDays, Check, ChevronRight, Cloud, Database, Eye, FileText, Flag, Home, LockKeyhole, MapPin, Plus, QrCode, Search, Send, Settings, ShieldAlert, ShieldCheck, Signal, Smartphone, Trash2, TrendingUp, Type, UserRound, Users, Wifi, X } from 'lucide-react'
 import { type BicycleRecord, type PersonRecord, mockUser } from './mock/data'
 import { db } from './lib/db'
 import * as api from './lib/api'
 import { startSyncWorker } from './lib/sync'
 
-type Screen = 'login' | 'home' | 'admin-home' | 'admin-transactions' | 'transaction-record' | 'flagged-queue' | 'bicycle-inventory' | 'ownership-chain' | 'registry-profile' | 'agent-management' | 'agent-onboarding' | 'agent-terminal' | 'reports-exports' | 'transaction' | 'register' | 'search' | 'details' | 'activity' | 'profile' | 'people' | 'person-activity'
+type Screen = 'login' | 'forgot-password' | 'reset-password' | 'home' | 'admin-home' | 'admin-transactions' | 'transaction-record' | 'flagged-queue' | 'bicycle-inventory' | 'ownership-chain' | 'registry-profile' | 'agent-management' | 'agent-onboarding' | 'agent-terminal' | 'reports-exports' | 'transaction' | 'register' | 'search' | 'details' | 'activity' | 'profile' | 'people' | 'person-activity'
 type RegisterOrigin = 'home' | 'admin-home'
 type Role = 'AGENT' | 'ADMIN'
 
@@ -33,6 +33,8 @@ export default function App() {
   const [selectedAgent, setSelectedAgent] = useState<api.Agent | null>(null)
   const [selectedOwnershipBicycle, setSelectedOwnershipBicycle] = useState<api.Bicycle | null>(null)
   const [selectedPerson, setSelectedPerson] = useState<api.Person | null>(null)
+  const [forgotEmail, setForgotEmail] = useState('')
+  const [fontSize, setFontSize] = useState<'sm' | 'md' | 'lg'>(() => (localStorage.getItem('fontSize') as 'sm' | 'md' | 'lg') ?? 'md')
   const [pendingCount, setPendingCount] = useState(0)
   const [isOnline, setIsOnline] = useState(navigator.onLine)
   const refreshPending = () =>
@@ -67,9 +69,13 @@ export default function App() {
   const profileOrigin = (): Screen => role === 'ADMIN' ? 'admin-home' : 'home'
   const go = (next: Screen) => { setSaved(false); if (next === 'transaction') setTransactionStep(0); setScreen(next) }
 
-  if (screen === 'login') return <Login onLogin={(user) => { setCurrentUser(user); setRole(user.role); go(user.role === 'ADMIN' ? 'admin-home' : 'home') }} />
+  if (screen === 'login') return <Login onLogin={(user) => { setCurrentUser(user); setRole(user.role); go(user.role === 'ADMIN' ? 'admin-home' : 'home') }} onForgot={() => go('forgot-password')} />
+  if (screen === 'forgot-password') return <ForgotPasswordScreen onBack={() => go('login')} onNext={(email) => { setForgotEmail(email); go('reset-password') }} />
+  if (screen === 'reset-password') return <ResetPasswordScreen email={forgotEmail} onBack={() => go('forgot-password')} onDone={() => go('login')} />
 
-  return <div className="terminal-shell">
+  const zoom = ({ sm: 0.88, md: 1, lg: 1.14 } as Record<string, number>)[fontSize] ?? 1
+
+  return <div className="terminal-shell" style={{ zoom }}>
     <header className="terminal-header">
       {screen !== 'home' && screen !== 'admin-home' && <button className="back-button" onClick={() => go(screen === 'details' ? detailsOrigin : screen === 'transaction-record' ? transactionOrigin : screen === 'person-activity' ? (role === 'ADMIN' ? 'registry-profile' : 'people') : screen === 'register' ? registerOrigin : screen === 'ownership-chain' ? 'bicycle-inventory' : screen === 'profile' ? profileOrigin() : role === 'ADMIN' ? 'admin-home' : 'home')} aria-label="Go back"><ArrowLeft size={17} /></button>}
       <strong>{screenTitle(screen)}</strong>
@@ -98,7 +104,7 @@ export default function App() {
       {screen === 'people' && <PeopleScreen onSelectPerson={(p) => { setSelectedPerson(p); go('person-activity') }} />}
       {screen === 'person-activity' && <PersonActivityScreen person={selectedPerson} onSelectTransaction={(id) => { setSelectedTransactionId(id); setTransactionOrigin('person-activity'); go('transaction-record') }} onOpenDetails={openDetailsById} />}
       {screen === 'registry-profile' && <PeopleScreen onSelectPerson={(p) => { setSelectedPerson(p); go('person-activity') }} />}
-      {screen === 'profile' && <ProfileScreen user={currentUser} role={role} onLogout={async () => { await api.logout().catch(() => undefined); setCurrentUser(null); setRole('AGENT'); go('login') }} />}
+      {screen === 'profile' && <ProfileScreen user={currentUser} role={role} fontSize={fontSize} onChangeFontSize={(v) => { setFontSize(v); localStorage.setItem('fontSize', v) }} onLogout={async () => { await api.logout().catch(() => undefined); setCurrentUser(null); setRole('AGENT'); go('login') }} />}
     </div>
     {role === 'ADMIN' ? <AdminBottomNav screen={screen} onNavigate={go} /> : screen !== 'transaction' && screen !== 'register' && screen !== 'details' && screen !== 'person-activity' && <BottomNav screen={screen} onNavigate={go} />}
     {ownerDetails && <OwnerDetailsModal person={ownerDetails} onClose={() => setOwnerDetails(null)} />}
@@ -106,10 +112,65 @@ export default function App() {
 }
 
 function screenTitle(screen: Screen) {
-  return { home: 'Agent Dashboard', 'admin-home': 'Biketrack Admin', 'admin-transactions': 'All Transactions', 'transaction-record': 'Transaction Record', 'flagged-queue': 'Flagged Queue', 'bicycle-inventory': 'Bicycle Inventory', 'ownership-chain': 'Ownership Chain', 'registry-profile': 'Registry Profile', 'agent-management': 'Field Agent Management', 'agent-onboarding': 'Agent Onboarding', 'agent-terminal': 'Agent Terminal', 'reports-exports': 'Reports & Exports', transaction: 'New Transaction', register: 'Register Bicycle', search: 'Search Field Records', details: 'Record Details', activity: 'Recent Activity', profile: 'Agent Profile & Settings', people: 'People Registry', 'person-activity': 'Person Activity', login: 'Login' }[screen]
+  return { home: 'Agent Dashboard', 'admin-home': 'Biketrack Admin', 'admin-transactions': 'All Transactions', 'transaction-record': 'Transaction Record', 'flagged-queue': 'Flagged Queue', 'bicycle-inventory': 'Bicycle Inventory', 'ownership-chain': 'Ownership Chain', 'registry-profile': 'Registry Profile', 'agent-management': 'Field Agent Management', 'agent-onboarding': 'Agent Onboarding', 'agent-terminal': 'Agent Terminal', 'reports-exports': 'Reports & Exports', transaction: 'New Transaction', register: 'Register Bicycle', search: 'Search Field Records', details: 'Record Details', activity: 'Recent Activity', profile: 'Agent Profile & Settings', people: 'People Registry', 'person-activity': 'Person Activity', login: 'Login', 'forgot-password': 'Reset Password', 'reset-password': 'Reset Password' }[screen]
 }
 
-function Login({ onLogin }: { onLogin: (user: { id: string; name: string; role: Role }) => void }) {
+function ForgotPasswordScreen({ onBack, onNext }: { onBack: () => void; onNext: (email: string) => void }) {
+  const [email, setEmail] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const submit = async () => {
+    setBusy(true); setError(null)
+    try { await api.forgotPassword(email); onNext(email) }
+    catch { setError('Something went wrong. Try again.') }
+    finally { setBusy(false) }
+  }
+  return <main className="login-screen">
+    <div className="login-hero"><div className="hero-bike"><Bike size={22} /></div><strong>CycleTrack</strong><small>FIELD AGENT TERMINAL</small></div>
+    <section className="login-panel"><p className="screen-kicker">RESET PASSWORD</p><p className="login-copy">Enter your account email. A 6-digit code will be sent to you.</p>
+      <label><span><Smartphone size={12} /> Email</span><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="agent@example.com" /></label>
+      {error && <p style={{ color: '#e05', fontSize: 13 }}>{error}</p>}
+      <button className="action-button" disabled={busy || !email} onClick={() => void submit()}>{busy ? 'Sending...' : 'Send code'} <ArrowRight size={16} /></button>
+      <button className="quiet-button" style={{ marginTop: 12 }} onClick={onBack}>Back to login</button>
+    </section>
+  </main>
+}
+
+function ResetPasswordScreen({ email, onBack, onDone }: { email: string; onBack: () => void; onDone: () => void }) {
+  const [otp, setOtp] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [done, setDone] = useState(false)
+  const submit = async () => {
+    if (newPassword !== confirm) { setError('Passwords do not match'); return }
+    if (newPassword.length < 12) { setError('Password must be at least 12 characters'); return }
+    setBusy(true); setError(null)
+    try { await api.resetPassword(email, otp, newPassword); setDone(true) }
+    catch { setError('Invalid or expired code') }
+    finally { setBusy(false) }
+  }
+  return <main className="login-screen">
+    <div className="login-hero"><div className="hero-bike"><Bike size={22} /></div><strong>CycleTrack</strong><small>FIELD AGENT TERMINAL</small></div>
+    <section className="login-panel"><p className="screen-kicker">RESET PASSWORD</p>
+      {done ? <>
+        <p style={{ color: '#4caf7d', margin: '12px 0' }}><Check size={14} /> Password reset successfully.</p>
+        <button className="action-button" onClick={onDone}>Back to login <ArrowRight size={16} /></button>
+      </> : <>
+        <p className="login-copy">Enter the 6-digit code sent to <strong>{email}</strong> and your new password.</p>
+        <label><span><LockKeyhole size={12} /> Code</span><input value={otp} onChange={(e) => setOtp(e.target.value)} maxLength={6} placeholder="000000" /></label>
+        <label><span><LockKeyhole size={12} /> New password (min 12)</span><input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} /></label>
+        <label><span><LockKeyhole size={12} /> Confirm password</span><input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} /></label>
+        {error && <p style={{ color: '#e05', fontSize: 13 }}>{error}</p>}
+        <button className="action-button" disabled={busy || !otp || !newPassword || !confirm} onClick={() => void submit()}>{busy ? 'Resetting...' : 'Reset password'} <ArrowRight size={16} /></button>
+        <button className="quiet-button" style={{ marginTop: 12 }} onClick={onBack}>Back</button>
+      </>}
+    </section>
+  </main>
+}
+
+function Login({ onLogin, onForgot }: { onLogin: (user: { id: string; name: string; role: Role }) => void; onForgot: () => void }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -128,6 +189,7 @@ function Login({ onLogin }: { onLogin: (user: { id: string; name: string; role: 
       <label><span><LockKeyhole size={12} /> Password</span><div className="password-input"><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} /><Eye size={15} /></div></label>
       {error && <p className="error-text" style={{color:'#e05'}}>{error}</p>}
       <button className="action-button" disabled={loading || !email || !password} onClick={() => void submit()}>{loading ? 'Signing in...' : 'Initialize terminal'} <ArrowRight size={16} /></button>
+      <button className="quiet-button" style={{ marginTop: 12 }} onClick={onForgot}>Forgot password?</button>
     </section>
     <footer className="offline-bar"><span><Signal size={14} /> Connectivity</span><strong>Offline-ready mode</strong><small>v2.4.1-field</small></footer>
   </main>
@@ -733,7 +795,7 @@ function ActivityScreen({ onOpenDetails, onSelectTransaction }: { onOpenDetails:
 }
 
 
-function ProfileScreen({ user, role, onLogout }: { user: { id: string; name: string; role: Role } | null; role: Role; onLogout: () => void }) {
+function ProfileScreen({ user, role, fontSize, onChangeFontSize, onLogout }: { user: { id: string; name: string; role: Role } | null; role: Role; fontSize: 'sm' | 'md' | 'lg'; onChangeFontSize: (v: 'sm' | 'md' | 'lg') => void; onLogout: () => void }) {
   const initials = user ? user.name.split(' ').map((p) => p[0]).join('').slice(0, 2).toUpperCase() : 'MO'
   const isAdmin = role === 'ADMIN'
   const [section, setSection] = useState<'main' | 'password' | 'sync' | 'cache'>('main')
@@ -783,6 +845,7 @@ function ProfileScreen({ user, role, onLogout }: { user: { id: string; name: str
   // Default transaction type
   const [defaultTxType, setDefaultTxType] = useState<'SALE' | 'TRANSFER'>(() => (localStorage.getItem('defaultTxType') as 'SALE' | 'TRANSFER') ?? 'SALE')
   const toggleDefaultTxType = (v: 'SALE' | 'TRANSFER') => { setDefaultTxType(v); localStorage.setItem('defaultTxType', v) }
+  const toggleFontSize = (v: 'sm' | 'md' | 'lg') => onChangeFontSize(v)
 
   if (section === 'password') return <section className="admin-panel">
     <p className="screen-kicker">SETTINGS</p><h1>Change Password</h1>
@@ -821,6 +884,12 @@ function ProfileScreen({ user, role, onLogout }: { user: { id: string; name: str
     <button className="settings-row" onClick={() => setSection('password')}><LockKeyhole size={17} /> Change password <ChevronRight size={15} /></button>
     <button className="settings-row" onClick={() => setSection('sync')}><Cloud size={17} /> Sync status <ChevronRight size={15} /></button>
     <button className="settings-row" onClick={() => setSection('cache')}><Database size={17} /> Clear local cache <ChevronRight size={15} /></button>
+    <div className="settings-row" style={{ cursor: 'default' }}>
+      <Type size={17} /> Text size
+      <span style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
+        {(['sm', 'md', 'lg'] as const).map((v) => <button key={v} onClick={() => toggleFontSize(v)} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 4, background: fontSize === v ? 'var(--accent, #4caf7d)' : 'transparent', border: '1px solid currentColor', cursor: 'pointer' }}>{v.toUpperCase()}</button>)}
+      </span>
+    </div>
     <div className="settings-row" style={{ cursor: 'default' }}>
       <FileText size={17} /> Default transaction type
       <span style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>

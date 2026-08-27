@@ -44,6 +44,14 @@ export async function changePassword(currentPassword: string, newPassword: strin
   return apiRequest<void>('/auth/password', { method: 'PATCH', body: JSON.stringify({ currentPassword, newPassword }) })
 }
 
+export async function forgotPassword(email: string) {
+  return apiRequest<void>('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) })
+}
+
+export async function resetPassword(email: string, otp: string, newPassword: string) {
+  return apiRequest<void>('/auth/reset-password', { method: 'POST', body: JSON.stringify({ email, otp, newPassword }) })
+}
+
 export async function logout() {
   await apiRequest<void>('/auth/logout', { method: 'POST' })
   localStorage.removeItem('abatco_token')

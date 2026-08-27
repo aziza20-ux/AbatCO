@@ -5,6 +5,7 @@ import { accessToken, bcrypt, issueRefreshToken, revokeRefreshToken, rotateRefre
 import { audit } from '../audit.js'
 import { prisma } from '../prisma.js'
 import type { AuthRequest } from '../middleware/auth.js'
+import { sendOtpEmail } from '../brevo.js'
 
 const credentials = z.object({ email: z.string().email().max(254), password: z.string().min(1).max(200) })
 export const loginLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false })
@@ -48,5 +49,39 @@ export async function logout(request: AuthRequest, response: Response) {
   if (raw) await revokeRefreshToken(raw)
   if (request.user) await audit(request.user.id, 'LOGOUT', 'User', request.user.id)
   response.setHeader('Set-Cookie', 'refresh_token=; Max-Age=0; HttpOnly; Path=/api/auth; SameSite=Lax')
+  return response.status(204).send()
+}
+
+export async function forgotPassword(request: Request, response: Response) {
+  const { email } = z.object({ email: z.string().email() }).parse(request.body)
+  const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } })
+  // Always return 204 to avoid email enumeration
+  if (!user || !user.isActive) return response.status(204).send()
+  const otp = String(Math.floor(100000 + Math.random() * 900000))
+  const hash = await bcrypt.hash(otp, 10)
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { resetOtp: hash, resetOtpExpiry: new Date(Date.now() + 15 * 60 * 1000) },
+  })
+  await sendOtpEmail(user.email, user.name, otp)
+  await audit(user.id, 'PASSWORD_RESET_REQUESTED', 'User', user.id)
+  return response.status(204).send()
+}
+
+export async function resetPassword(request: Request, response: Response) {
+  const { email, otp, newPassword } = z.object({
+    email: z.string().email(),
+    otp: z.string().length(6),
+    newPassword: z.string().min(12).max(200),
+  }).parse(request.body)
+  const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } })
+  if (!user || !user.resetOtp || !user.resetOtpExpiry) return response.status(400).json({ error: { code: 'INVALID_OTP', message: 'Invalid or expired code' } })
+  if (user.resetOtpExpiry < new Date()) return response.status(400).json({ error: { code: 'OTP_EXPIRED', message: 'Code has expired' } })
+  if (!(await bcrypt.compare(otp, user.resetOtp))) return response.status(400).json({ error: { code: 'INVALID_OTP', message: 'Invalid or expired code' } })
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { passwordHash: await bcrypt.hash(newPassword, 12), resetOtp: null, resetOtpExpiry: null },
+  })
+  await audit(user.id, 'PASSWORD_RESET', 'User', user.id)
   return response.status(204).send()
 }
