@@ -1,7 +1,7 @@
 import bcrypt from 'bcrypt'
 import crypto from 'node:crypto'
 import jwt from 'jsonwebtoken'
-import { prisma } from './prisma.js'
+import { prisma, type PrismaTx } from './prisma.js'
 
 const refreshDays = 30
 const accessDays = 7
@@ -30,7 +30,7 @@ export async function rotateRefreshToken(raw: string) {
   const token = await prisma.refreshToken.findUnique({ where: { tokenHash: refreshHash(raw) }, include: { user: true } })
   if (!token || token.revokedAt || token.expiresAt <= new Date() || !token.user.isActive) throw new Error('Invalid refresh token')
   const replacement = crypto.randomBytes(48).toString('base64url')
-  await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async (tx: PrismaTx) => {
     await tx.refreshToken.update({ where: { id: token.id }, data: { revokedAt: new Date(), replacedById: refreshHash(replacement) } })
     await tx.refreshToken.create({ data: { tokenHash: refreshHash(replacement), userId: token.userId, expiresAt: new Date(Date.now() + refreshDays * 86400000) } })
   })

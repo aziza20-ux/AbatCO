@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { bcrypt } from '../auth.js'
 import { audit } from '../audit.js'
 import { jsonValue } from '../json.js'
-import { prisma } from '../prisma.js'
+import { prisma, type PrismaTx } from '../prisma.js'
 import type { AuthRequest } from '../middleware/auth.js'
 
 const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
@@ -47,7 +47,7 @@ export async function resolveConflict(request: AuthRequest, response: Response) 
     const type = payload.type as 'SALE' | 'TRANSFER' | undefined
     if (!bicycleId || !buyerId || !type) return response.status(422).json({ error: { code: 'INVALID_PAYLOAD', message: 'Preserved payload is missing required fields' } })
 
-    const created = await prisma.$transaction(async (tx) => {
+    const created = await prisma.$transaction(async (tx: PrismaTx) => {
       const bicycle = await tx.bicycle.findUnique({ where: { id: bicycleId } })
       if (!bicycle) throw Object.assign(new Error('Bicycle not found'), { status: 404 })
       const mismatch = Boolean(sellerId && bicycle.currentOwnerId && sellerId !== bicycle.currentOwnerId)
@@ -86,7 +86,7 @@ export async function resolveConflict(request: AuthRequest, response: Response) 
     const ownerId = payload.ownerId as string | undefined
     if (!bicycleId || !ownerId) return response.status(422).json({ error: { code: 'INVALID_PAYLOAD', message: 'Preserved payload is missing required fields' } })
 
-    const created = await prisma.$transaction(async (tx) => {
+    const created = await prisma.$transaction(async (tx: PrismaTx) => {
       const registration = await tx.registration.create({ data: { bicycleId, ownerId, recordingAgentId: operation.userId } })
       await tx.bicycle.update({ where: { id: bicycleId }, data: { currentOwnerId: ownerId } })
       await tx.syncOperation.update({ where: { id: operation.id }, data: { status: 'APPLIED', entityId: registration.id } })

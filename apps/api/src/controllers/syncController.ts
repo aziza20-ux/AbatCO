@@ -2,7 +2,7 @@ import crypto from 'node:crypto'
 import type { Response } from 'express'
 import { z } from 'zod'
 import { jsonValue } from '../json.js'
-import { prisma } from '../prisma.js'
+import { prisma, type PrismaTx } from '../prisma.js'
 import type { AuthRequest } from '../middleware/auth.js'
 
 const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
@@ -66,14 +66,14 @@ const registrationPayload = z.object({
   ownerId: z.string().cuid(),
 })
 
-async function resolvePersonId(tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0], data: z.infer<typeof personShape>): Promise<string> {
+async function resolvePersonId(tx: PrismaTx, data: z.infer<typeof personShape>): Promise<string> {
   const existing = await tx.person.findUnique({ where: { nationalId: data.nationalId } })
   if (existing) return existing.id
   const created = await tx.person.create({ data })
   return created.id
 }
 
-async function resolveBicycleId(tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0], data: z.infer<typeof bicycleShape>): Promise<string> {
+async function resolveBicycleId(tx: PrismaTx, data: z.infer<typeof bicycleShape>): Promise<string> {
   const existing = await tx.bicycle.findUnique({ where: { frameNumber: data.frameNumber } })
   if (existing) return existing.id
   const created = await tx.bicycle.create({ data })
@@ -95,7 +95,7 @@ async function applyTransaction(
   const rawParse = rawTransactionPayload.safeParse(rawPayload)
   if (rawParse.success) {
     const r = rawParse.data._raw
-    const resolved = await prisma.$transaction(async (tx) => {
+    const resolved = await prisma.$transaction(async (tx: PrismaTx) => {
       const [bicycleId, buyerId, sellerId] = await Promise.all([
         resolveBicycleId(tx, r.bicycle),
         resolvePersonId(tx, r.buyer),
@@ -113,7 +113,7 @@ async function applyTransaction(
   if (body.type === 'SALE' && body.price === undefined) return { status: 'VALIDATION_ERROR', conflictReason: 'Sale price is required for a sale' }
   if (body.type === 'TRANSFER' && body.price !== undefined) return { status: 'VALIDATION_ERROR', conflictReason: 'Transfer cannot include a sale price' }
 
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx: PrismaTx) => {
     const bicycle = await tx.bicycle.findUnique({ where: { id: body.bicycleId } })
     if (!bicycle) return { status: 'VALIDATION_ERROR', conflictReason: 'Bicycle not found' }
 
@@ -170,7 +170,7 @@ async function applyRegistration(
   const rawParse = rawRegistrationPayload.safeParse(rawPayload)
   if (rawParse.success) {
     const r = rawParse.data._raw
-    const resolved = await prisma.$transaction(async (tx) => {
+    const resolved = await prisma.$transaction(async (tx: PrismaTx) => {
       const [bicycleId, ownerId] = await Promise.all([
         resolveBicycleId(tx, r.bicycle),
         resolvePersonId(tx, r.person),
@@ -184,7 +184,7 @@ async function applyRegistration(
   if (!parse.success) return { status: 'VALIDATION_ERROR', conflictReason: parse.error.issues.map((i) => i.message).join('; ') }
   const body = parse.data
 
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx: PrismaTx) => {
     const created = await tx.registration.create({ data: { bicycleId: body.bicycleId, ownerId: body.ownerId, recordingAgentId: userId } })
     await tx.bicycle.update({ where: { id: body.bicycleId }, data: { currentOwnerId: body.ownerId } })
     await tx.syncOperation.upsert({
