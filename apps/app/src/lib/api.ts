@@ -138,7 +138,8 @@ export async function createRegistration(data: { bicycleId: string; ownerId: str
 
 // ── Admin ─────────────────────────────────────────────────────────────────────
 
-export type Agent = { id: string; name: string; email: string; phone?: string; isActive: boolean; createdAt: string; _count: { transactions: number } }
+export type AgentPermissions = { canRegister?: boolean; canTransfer?: boolean; canFlag?: boolean; canOverride?: boolean }
+export type Agent = { id: string; name: string; email: string; phone?: string; isActive: boolean; createdAt: string; permissions: AgentPermissions; _count: { transactions: number } }
 
 export async function getDashboard() {
   return apiRequest<ApiEnvelope<{ bicycles: number; activeAgents: number; transactions: number; flags: number }>>('/admin/dashboard')
@@ -154,6 +155,10 @@ export async function createAgent(data: { name: string; email: string; phone?: s
 
 export async function revokeAgent(id: string) {
   return apiRequest<ApiEnvelope<{ id: string; isActive: boolean }>>(`/admin/agents/${id}/revoke`, { method: 'PATCH' })
+}
+
+export async function updateAgentPermissions(id: string, permissions: AgentPermissions) {
+  return apiRequest<ApiEnvelope<{ id: string; permissions: AgentPermissions }>>(`/admin/agents/${id}/permissions`, { method: 'PATCH', body: JSON.stringify(permissions) })
 }
 
 export async function reinstateAgent(id: string) {

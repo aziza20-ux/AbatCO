@@ -13,8 +13,8 @@ function createTransactionId() {
 }
 
 export async function dashboard(_request: AuthRequest, response: Response) { const [bicycles, agents, transactions, flags] = await Promise.all([prisma.bicycle.count(), prisma.user.count({ where: { role: 'AGENT', isActive: true } }), prisma.transaction.count(), prisma.transaction.count({ where: { flagStatus: { in: ['FLAGGED', 'CONFLICTED'] } } })]); return response.json({ data: { bicycles, activeAgents: agents, transactions, flags } }) }
-export async function listAgents(request: AuthRequest, response: Response) { const query = z.object({ page: z.coerce.number().int().min(1).default(1), limit: z.coerce.number().int().min(1).max(100).default(20) }).parse(request.query); const agents = await prisma.user.findMany({ where: { role: 'AGENT' }, skip: (query.page - 1) * query.limit, take: query.limit, select: { id: true, email: true, name: true, phone: true, isActive: true, createdAt: true, _count: { select: { transactions: true } } }, orderBy: { name: 'asc' } }); return response.json({ data: agents }) }
-export async function createAgent(request: AuthRequest, response: Response) { const input = z.object({ name: z.string().trim().min(1).max(160), email: z.string().email(), phone: z.string().trim().max(40).optional(), password: z.string().min(12).max(200) }).parse(request.body); const user = await prisma.user.create({ data: { name: input.name, email: input.email.toLowerCase(), phone: input.phone, passwordHash: await bcrypt.hash(input.password, 12), role: 'AGENT' }, select: { id: true, name: true, email: true, phone: true, role: true, isActive: true } }); await audit(request.user!.id, 'AGENT_CREATED', 'User', user.id); return response.status(201).json({ data: user }) }
+export async function listAgents(request: AuthRequest, response: Response) { const query = z.object({ page: z.coerce.number().int().min(1).default(1), limit: z.coerce.number().int().min(1).max(100).default(20) }).parse(request.query); const agents = await prisma.user.findMany({ where: { role: 'AGENT' }, skip: (query.page - 1) * query.limit, take: query.limit, select: { id: true, email: true, name: true, phone: true, isActive: true, permissions: true, createdAt: true, _count: { select: { transactions: true } } }, orderBy: { name: 'asc' } }); return response.json({ data: agents }) }
+export async function createAgent(request: AuthRequest, response: Response) { const input = z.object({ name: z.string().trim().min(1).max(160), email: z.string().email(), phone: z.string().trim().max(40).optional(), password: z.string().min(12).max(200) }).parse(request.body); const user = await prisma.user.create({ data: { name: input.name, email: input.email.toLowerCase(), phone: input.phone, passwordHash: await bcrypt.hash(input.password, 12), role: 'AGENT', permissions: { canRegister: true, canTransfer: true } }, select: { id: true, name: true, email: true, phone: true, role: true, isActive: true, permissions: true } }); await audit(request.user!.id, 'AGENT_CREATED', 'User', user.id); return response.status(201).json({ data: user }) }
 export async function revokeAgent(request: AuthRequest, response: Response) { const user = await prisma.user.update({ where: { id: String(request.params.id) }, data: { isActive: false }, select: { id: true, isActive: true } }); await audit(request.user!.id, 'AGENT_REVOKED', 'User', user.id); return response.json({ data: user }) }
 export async function reinstateAgent(request: AuthRequest, response: Response) { const user = await prisma.user.update({ where: { id: String(request.params.id) }, data: { isActive: true }, select: { id: true, isActive: true } }); await audit(request.user!.id, 'AGENT_REINSTATED', 'User', user.id); return response.json({ data: user }) }
 export async function reviewTransaction(request: AuthRequest, response: Response) { const input = z.object({ status: z.enum(['REVIEWED', 'FLAGGED']), notes: z.string().trim().max(1000).optional() }).parse(request.body); const transaction = await prisma.transaction.update({ where: { id: String(request.params.id) }, data: { flagStatus: input.status, adminReviewedById: request.user!.id, adminReviewedAt: new Date(), adminReviewNotes: input.notes } }); await audit(request.user!.id, 'ADMIN_REVIEWED_TRANSACTION', 'Transaction', transaction.id, { status: input.status }); return response.json({ data: transaction }) }
@@ -101,4 +101,20 @@ export async function resolveConflict(request: AuthRequest, response: Response) 
   return response.status(422).json({ error: { code: 'UNSUPPORTED_ENTITY', message: 'Cannot resolve this entity type' } })
 }
 
-export const adminHandlers = { dashboard, listAgents, createAgent, revokeAgent, reinstateAgent, reviewTransaction, conflicts, resolveConflict }
+export async function updateAgentPermissions(request: AuthRequest, response: Response) {
+  const input = z.object({
+    canRegister: z.boolean().optional(),
+    canTransfer: z.boolean().optional(),
+    canFlag: z.boolean().optional(),
+    canOverride: z.boolean().optional(),
+  }).parse(request.body)
+  const agent = await prisma.user.findUnique({ where: { id: String(request.params.id) } })
+  if (!agent || agent.role !== 'AGENT') return response.status(404).json({ error: { code: 'NOT_FOUND', message: 'Agent not found' } })
+  const current = (agent.permissions ?? {}) as Record<string, boolean>
+  const merged = { ...current, ...Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined)) }
+  const updated = await prisma.user.update({ where: { id: agent.id }, data: { permissions: merged }, select: { id: true, permissions: true } })
+  await audit(request.user!.id, 'AGENT_PERMISSIONS_UPDATED', 'User', agent.id, { permissions: merged })
+  return response.json({ data: updated })
+}
+
+export const adminHandlers = { dashboard, listAgents, createAgent, revokeAgent, reinstateAgent, reviewTransaction, conflicts, resolveConflict, updateAgentPermissions }
