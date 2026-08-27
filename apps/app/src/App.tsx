@@ -400,7 +400,30 @@ function AgentTerminalScreen({ agent, onNavigate }: { agent: api.Agent | null; o
     <button className="admin-wide-button" onClick={() => onNavigate('agent-management')}>Return to agents</button>
   </AdminPanel>
 }
-function ReportsExportsScreen({ onNavigate }: { onNavigate: (screen: Screen) => void }) { return <AdminPanel title="Reports & Exports" kicker="ADVANCED ANALYTICS"><div className="report-hero"><TrendingUp size={25} /><strong>Generate encrypted audit reports</strong><small>Industry-standard audit trails and operational summaries.</small></div>{['Transaction audit log', 'Agent performance', 'Flagged incident summary', 'Inventory status'].map((name) => <button className="report-option" key={name}><FileText size={15} /><strong>{name}<small>Full history of registry actions and transactions</small></strong><ChevronRight size={14} /></button>)}<button className="admin-wide-button" onClick={() => onNavigate('admin-home')}>Preview report data</button></AdminPanel> }
+function ReportsExportsScreen({ onNavigate }: { onNavigate: (screen: Screen) => void }) {
+  const [busy, setBusy] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const run = async (key: string, params: Parameters<typeof api.downloadTransactionsXlsx>[0]) => {
+    setBusy(key); setError(null)
+    try { await api.downloadTransactionsXlsx(params) }
+    catch { setError('Export failed. Try again.') }
+    finally { setBusy(null) }
+  }
+  const reports: { key: string; label: string; sub: string; params: Parameters<typeof api.downloadTransactionsXlsx>[0] }[] = [
+    { key: 'all', label: 'Transaction audit log', sub: 'All transactions — full history', params: {} },
+    { key: 'sales', label: 'Sales report', sub: 'SALE type transactions only', params: { type: 'SALE' } },
+    { key: 'transfers', label: 'Transfers report', sub: 'TRANSFER type transactions only', params: { type: 'TRANSFER' } },
+    { key: 'flagged', label: 'Flagged incident summary', sub: 'All flagged and conflicted records', params: { flagStatus: 'FLAGGED' } },
+  ]
+  return <AdminPanel title="Reports & Exports" kicker="ADVANCED ANALYTICS">
+    <div className="report-hero"><TrendingUp size={25} /><strong>Generate encrypted audit reports</strong><small>Industry-standard audit trails and operational summaries.</small></div>
+    {error && <p className="error-text" style={{ color: '#e05', marginBottom: 8 }}>{error}</p>}
+    {reports.map(({ key, label, sub, params }) => <button className="report-option" key={key} disabled={busy !== null} onClick={() => void run(key, params)}>
+      <FileText size={15} /><strong>{label}<small>{sub}</small></strong>{busy === key ? <span style={{ fontSize: 11, color: '#7f8d87' }}>Downloading...</span> : <ChevronRight size={14} />}
+    </button>)}
+    <button className="admin-wide-button" style={{ marginTop: 8 }} onClick={() => onNavigate('admin-home')}>Back to admin home</button>
+  </AdminPanel>
+}
 function AdminPanel({ title, kicker, children }: { title: string; kicker: string; children: ReactNode }) { return <section className="admin-panel"><p className="screen-kicker">{kicker}</p><h1>{title}</h1>{children}</section> }
 function AdminInfo({ title, rows }: { title: string; rows: string[] }) { return <div className="admin-info"><h2>{title}</h2>{rows.map((row) => <p key={row}>{row}</p>)}</div> }
 
@@ -465,7 +488,7 @@ function TransactionFlow({ step, setStep, saved, onSave, onCancel, onViewOwner }
     await import('./lib/sync').then(({ flushPendingOperations }) => flushPendingOperations()).catch(() => undefined)
     setIsSaving(false); onSave()
   }
-  if (saved) return <Success title="Transaction queued" copy="The bicycle and transaction are saved locally. They will sync when connectivity returns." onDone={onCancel} />
+  if (saved) return <Success title="Transaction recorded" copy="The bicycle and transaction are saved locally. They will sync when connectivity returns." onDone={onCancel} />
   const steps = ['Type', 'Serial', 'Bicycle', 'Parties', 'Review', 'Done']
   const next = () => { if (step === 0) setStep(1); else if (step === 1 && serialChecked && (!serialFound || serialConfirmed)) setStep(serialFound ? 3 : 2); else if (step === 2) setStep(3); else if (step === 3) setStep(4); else if (step === 4) void saveTransaction() }
   return <section className="flow-screen"><div className="stepper">{steps.map((label, index) => <span key={label} className={index <= step ? 'current' : ''}><i>{index + 1}</i><small>{label}</small></span>)}</div>
@@ -593,7 +616,10 @@ function RegisterScreen({ saved, onSave, onCancel, onViewOwner }: { saved: boole
     <div className="flow-actions"><button className="quiet-button" onClick={phase === 'serial' ? onCancel : () => setPhase(phase === 'person-new' ? 'person-search' : phase === 'review' ? 'person-search' : phase === 'person-search' ? 'bicycle' : 'serial')}>Back</button><button className="action-button" disabled={(phase === 'serial' && (!serialChecked || (Boolean(serialOwner) && !serialConfirmed))) || (phase === 'person-search' && !person) || (phase === 'person-new' && (!newPerson.name || newPerson.nationalId.length !== 16)) || isSaving} onClick={() => { if (phase === 'serial') setPhase(serialOwner ? 'person-search' : 'bicycle'); else if (phase === 'bicycle') setPhase('person-search'); else if (phase === 'person-search') setPhase('review'); else if (phase === 'person-new') { setDraft((current) => ({ ...current, person: { id: `person-${newPerson.nationalId}`, ...newPerson } })); setPhase('review') } else void saveRegistration() }}>{isSaving ? 'Saving...' : phase === 'review' ? 'Save registration' : 'Continue'} <ArrowRight size={15} /></button></div>
   </section>
 }
-function Success({ title, copy, onDone }: { title: string; copy: string; onDone: () => void }) { return <div className="success-screen"><span><Check size={28} /></span><h2>{title}</h2><p>{copy}</p><button className="action-button" onClick={onDone}>Return to dashboard <Home size={15} /></button></div> }
+function Success({ title, copy, onDone }: { title: string; copy: string; onDone: () => void }) {
+  const online = navigator.onLine
+  return <div className="success-screen"><span><Check size={28} /></span><h2>{title}</h2><p>{online ? 'Recorded successfully.' : copy}</p><button className="action-button" onClick={onDone}>Return to dashboard <Home size={15} /></button></div>
+}
 
 function SearchScreen({ query, setQuery, onSelect }: { query: string; setQuery: (query: string) => void; onSelect: (record: BicycleRecord) => void }) {
   type DateFilter = 'last30' | 'specific' | 'range' | 'all'
