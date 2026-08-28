@@ -6,8 +6,8 @@ export default defineConfig({
   plugins: [react(), VitePWA({
       registerType: 'autoUpdate',
       manifest: {
-        name: 'Bicycle Records',
-        short_name: 'Bicycle Records',
+        name: 'CycleTrack',
+        short_name: 'AbatCo',
         start_url: '/',
         display: 'standalone',
         theme_color: '#2f6f4e',

@@ -126,7 +126,7 @@ function ForgotPasswordScreen({ onBack, onNext }: { onBack: () => void; onNext: 
     finally { setBusy(false) }
   }
   return <main className="login-screen">
-    <div className="login-hero"><div className="hero-bike"><Bike size={22} /></div><strong>CycleTrack</strong><small>FIELD AGENT TERMINAL</small></div>
+    <div className="login-hero"><div className="hero-bike"><img src="/icons/icon-192.png" alt="AbatCO" /></div><strong>CycleTrack</strong><small>FIELD AGENT TERMINAL</small></div>
     <section className="login-panel"><p className="screen-kicker">RESET PASSWORD</p><p className="login-copy">Enter your account email. A 6-digit code will be sent to you.</p>
       <label><span><Smartphone size={12} /> Email</span><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="agent@example.com" /></label>
       {error && <p style={{ color: '#e05', fontSize: 13 }}>{error}</p>}
@@ -168,7 +168,7 @@ function ResetPasswordScreen({ email, onBack, onDone }: { email: string; onBack:
     finally { setBusy(false) }
   }
   return <main className="login-screen">
-    <div className="login-hero"><div className="hero-bike"><Bike size={22} /></div><strong>CycleTrack</strong><small>FIELD AGENT TERMINAL</small></div>
+    <div className="login-hero"><div className="hero-bike"><img src="/icons/icon-192.png" alt="AbatCO" /></div><strong>CycleTrack</strong><small>FIELD AGENT TERMINAL</small></div>
     <section className="login-panel"><p className="screen-kicker">RESET PASSWORD</p>
       {done ? <>
         <p style={{ color: '#4caf7d', margin: '12px 0' }}><Check size={14} /> Password reset successfully.</p>
@@ -203,7 +203,7 @@ function Login({ onLogin, onForgot }: { onLogin: (user: { id: string; name: stri
     finally { setLoading(false) }
   }
   return <main className="login-screen">
-    <div className="login-hero"><div className="hero-bike"><Bike size={22} /></div><strong>CycleTrack</strong><small>FIELD AGENT TERMINAL</small></div>
+    <div className="login-hero"><div className="hero-bike"><img src="/icons/icon-192.png" alt="AbatCO" /></div><strong>CycleTrack</strong><small>FIELD AGENT TERMINAL</small></div>
     <section className="login-panel"><p className="screen-kicker">SECURE ENTRY</p><p className="login-copy">Authorized personnel only.</p>
       <label><span><Smartphone size={12} /> Email</span><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="agent@example.com" /></label>
       <label><span><LockKeyhole size={12} /> Password</span><div className="password-input"><input type={showPassword ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} /><Eye size={15} style={{ cursor: 'pointer', flexShrink: 0 }} onClick={() => setShowPassword((v) => !v)} /></div></label>
