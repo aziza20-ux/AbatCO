@@ -518,27 +518,29 @@ function TransactionFlow({ step, setStep, saved, onSave, onCancel, onViewOwner }
   const [serialConfirmed, setSerialConfirmed] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const update = <K extends keyof TransactionDraft>(key: K, value: TransactionDraft[K]) => setDraft((current) => ({ ...current, [key]: value }))
-  const verifySerial = async () => {
+  const verifySerial = async (): Promise<{ found: boolean; owner: PersonRecord | null }> => {
     const normalized = draft.frameNumber.trim()
-    if (!normalized) return
+    if (!normalized) { setSerialChecked(true); setSerialFound(false); setSerialOwner(null); setSerialConfirmed(false); return { found: false, owner: null } }
     setSerialChecked(false)
+    let found = false
+    let owner: PersonRecord | null = null
     try {
       const result = await api.listBicycles(normalized)
       const match = result.data.find((b) => b.frameNumber.toLowerCase() === normalized.toLowerCase())
       if (match) {
-        const owner = match.currentOwner ? { id: match.currentOwner.id, name: match.currentOwner.name, nationalId: (match.currentOwner as api.Person).nationalId ?? '', phone: (match.currentOwner as api.Person).phone ?? '', cell: (match.currentOwner as api.Person).cell ?? '', sector: (match.currentOwner as api.Person).sector ?? '', village: (match.currentOwner as api.Person).village ?? '' } : null
-        setSerialOwner(owner); setSerialFound(true)
-      } else {
-        setSerialOwner(null); setSerialFound(false)
+        owner = match.currentOwner ? { id: match.currentOwner.id, name: match.currentOwner.name, nationalId: (match.currentOwner as api.Person).nationalId ?? '', phone: (match.currentOwner as api.Person).phone ?? '', cell: (match.currentOwner as api.Person).cell ?? '', sector: (match.currentOwner as api.Person).sector ?? '', village: (match.currentOwner as api.Person).village ?? '' } : null
+        found = true
       }
     } catch {
       // offline — fall back to Dexie cache
       const cachedBicycle = (await db.cachedBicycles.toArray()).find((r) => ((r.data as { frameNumber?: string }).frameNumber ?? '').toLowerCase() === normalized.toLowerCase())
       const cachedOwnerId = cachedBicycle ? (cachedBicycle.data as { currentOwnerId?: string }).currentOwnerId : undefined
       const cachedOwner = cachedOwnerId ? (await db.cachedPeople.get(cachedOwnerId))?.data as PersonRecord | undefined : undefined
-      setSerialOwner(cachedOwner ?? null); setSerialFound(Boolean(cachedBicycle))
+      owner = cachedOwner ?? null
+      found = Boolean(cachedBicycle)
     }
-    setSerialConfirmed(false); setSerialChecked(true)
+    setSerialOwner(owner); setSerialFound(found); setSerialConfirmed(false); setSerialChecked(true)
+    return { found, owner }
   }
   const total = (Number(draft.bicyclePrice) || 0) + (Number(draft.serviceFee) || 0)
   const saveTransaction = async () => {
@@ -569,20 +571,32 @@ function TransactionFlow({ step, setStep, saved, onSave, onCancel, onViewOwner }
   }
   if (saved) return <Success title="Transaction recorded" copy="The bicycle and transaction are saved locally. They will sync when connectivity returns." onDone={onCancel} />
   const steps = ['Type', 'Serial', 'Bicycle', 'Parties', 'Review', 'Done']
-  const next = () => { if (step === 0) setStep(1); else if (step === 1 && serialChecked && (!serialFound || serialConfirmed)) setStep(serialFound ? 3 : 2); else if (step === 2) setStep(3); else if (step === 3) setStep(4); else if (step === 4) void saveTransaction() }
+  const next = async () => {
+    if (step === 0) { setStep(1); return }
+    if (step === 1) {
+      if (serialChecked && serialFound && !serialConfirmed) return // duplicate not yet acknowledged
+      setStep(serialChecked && serialFound ? 3 : 2)
+      return
+    }
+    if (step === 2) { setStep(3); return }
+    if (step === 3) { setStep(4); return }
+    if (step === 4) void saveTransaction()
+  }
   return <section className="flow-screen"><div className="stepper">{steps.map((label, index) => <span key={label} className={index <= step ? 'current' : ''}><i>{index + 1}</i><small>{label}</small></span>)}</div>
     {step === 0 && <ChoiceStep type={draft.type} onTypeChange={(type) => update('type', type)} />}
     {step === 1 && <SerialStep value={draft.frameNumber} onChange={(value) => update('frameNumber', value)} checked={serialChecked} found={serialFound} owner={serialOwner} confirmed={serialConfirmed} onVerify={verifySerial} onConfirm={() => setSerialConfirmed(true)} onUse={() => setStep(3)} onViewOwner={onViewOwner} />}
     {step === 2 && <BicycleCaptureStep draft={draft} update={update} />}
     {step === 3 && <PartyStep draft={draft} update={update} />}
     {step === 4 && <ReviewStep draft={draft} total={total} onPrint={() => window.print()} />}
-    <div className="flow-actions"><button className="quiet-button" onClick={step === 0 ? onCancel : () => setStep(step === 3 && serialFound ? 1 : step - 1)}>Back</button><button className="action-button" disabled={(step === 1 && !serialChecked) || isSaving} onClick={next}>{isSaving ? 'Saving...' : step === 4 ? 'Save transaction' : 'Continue'} <ArrowRight size={15} /></button></div>
+    <div className="flow-actions"><button className="quiet-button" onClick={step === 0 ? onCancel : () => setStep(step === 3 && serialFound ? 1 : step - 1)}>Back</button><button className="action-button" disabled={isSaving} onClick={() => void next()}>{isSaving ? 'Saving...' : step === 4 ? 'Save transaction' : 'Continue'} <ArrowRight size={15} /></button></div>
   </section>
 }
 
 function ChoiceStep({ type, onTypeChange }: { type: TransactionDraft['type']; onTypeChange: (type: TransactionDraft['type']) => void }) { const options: [TransactionDraft['type'], string, string, typeof FileText][] = [['SALE', 'Sell', 'Record a sale and permanent change of ownership', FileText], ['TRANSFER', 'Ownership transfer', 'Transfer ownership without a sale price', MapPin]]; return <div className="flow-body"><h2>Select transaction type</h2><p>Choose the record type for this field operation. Both flows verify the people involved by national ID.</p>{options.map(([value, title, copy, Icon]) => <button className={`choice-card ${type === value ? 'selected-choice' : ''}`} key={value} onClick={() => onTypeChange(value)}><span><Icon size={19} /></span><b>{title}</b><small>{copy}</small><ChevronRight /></button>)}</div> }
 function SerialStep({ value, onChange, checked, found, owner, confirmed, onVerify, onConfirm, onUse, onViewOwner }: { value: string; onChange: (value: string) => void; checked: boolean; found: boolean; owner: PersonRecord | null; confirmed: boolean; onVerify: () => void; onConfirm: () => void; onUse: () => void; onViewOwner: (person: PersonRecord) => void }) { return <div className="flow-body"><h2>Verify serial number</h2><p>Check the local database before creating a bicycle record.</p><label>Frame serial number<div className="serial-input"><QrCode size={16} /><input value={value} onChange={(event) => onChange(event.target.value)} placeholder="E.G. AB12345678" /><Smartphone size={16} /></div></label><button className="secondary-button" onClick={() => void onVerify()}><Search size={15} /> Verify database</button>{checked && found && <div className="duplicate-warning"><ShieldAlert size={17} /><span><strong>Duplicate bicycle found</strong><small>This serial is already linked to an owner. Resolve the issue before continuing.</small>{owner && <><button className="owner-details-link" onClick={() => onViewOwner(owner)}>View owner details <ArrowRight size={12} /></button><div className="owner-details"><b>{owner.name}</b><small>{owner.nationalId} · {owner.phone}</small><small>{owner.sector} · {owner.village}</small></div></>}</span><div className="duplicate-actions">{confirmed ? <Check className="confirmation-check" size={17} /> : <button className="confirm-warning" onClick={onConfirm}>Issue resolved</button>}<button className="use-bicycle-btn" onClick={onUse}>Use this bicycle <ArrowRight size={12} /></button></div></div>}{checked && !found && <div className="verification-result not-found"><Check size={15} /><span><strong>Serial available</strong><small>No bicycle record was found. Continue to capture the bicycle.</small></span></div>}<p className="section-label">Common serial locations</p><div className="location-grid"><span>Bottom bracket<b>Under pedals</b></span><span>Head tube<b>Front of frame</b></span><span>Seat tube<b>Near saddle</b></span><span>Rear dropout<b>Back wheel hub</b></span></div></div> }
-function BicycleCaptureStep({ draft, update }: { draft: TransactionDraft; update: <K extends keyof TransactionDraft>(key: K, value: TransactionDraft[K]) => void }) { return <div className="flow-body"><h2>Record the bicycle</h2><p>This frame is new to the database. Capture its identifying details before recording the parties.</p><div className="capture-summary"><span>Frame serial<strong>{draft.frameNumber || 'Not entered'}</strong></span><span className="not-found-label">New bicycle record</span></div><div className="two-fields"><label>Brand<input value={draft.bicycleBrand} onChange={(event) => update('bicycleBrand', event.target.value)} placeholder="e.g. Trek" /></label><label>Model<input value={draft.bicycleModel} onChange={(event) => update('bicycleModel', event.target.value)} placeholder="e.g. Marlin 7" /></label></div><div className="two-fields"><label>Color<input value={draft.bicycleColor} onChange={(event) => update('bicycleColor', event.target.value)} placeholder="e.g. black" /></label><label>Photo reference<input placeholder="Optional photo ID" /></label></div><label>Distinguishing features<textarea value={draft.distinguishingFeatures} onChange={(event) => update('distinguishingFeatures', event.target.value)} placeholder="Scratches, markings, accessories" /></label></div> }
+function BicycleCaptureStep({ draft, update }: { draft: TransactionDraft; update: <K extends keyof TransactionDraft>(key: K, value: TransactionDraft[K]) => void }) {
+  const [serialLocked, setSerialLocked] = useState(!!draft.frameNumber)
+  return <div className="flow-body"><h2>Record the bicycle</h2><p>Capture the bicycle details before recording the parties.</p>{serialLocked ? <div className="capture-summary"><span>Frame serial<strong>{draft.frameNumber}</strong></span><span className="not-found-label">New bicycle record</span></div> : <label>Frame serial number<div className="serial-input"><QrCode size={16} /><input value={draft.frameNumber} onChange={(event) => update('frameNumber', event.target.value)} onBlur={() => { if (draft.frameNumber.trim()) setSerialLocked(true) }} placeholder="E.G. AB12345678" /></div></label>}<div className="two-fields"><label>Brand<input value={draft.bicycleBrand} onChange={(event) => update('bicycleBrand', event.target.value)} placeholder="e.g. Trek" /></label><label>Model<input value={draft.bicycleModel} onChange={(event) => update('bicycleModel', event.target.value)} placeholder="e.g. Marlin 7" /></label></div><div className="two-fields"><label>Color<input value={draft.bicycleColor} onChange={(event) => update('bicycleColor', event.target.value)} placeholder="e.g. black" /></label><label>Photo reference<input placeholder="Optional photo ID" /></label></div><label>Distinguishing features<textarea value={draft.distinguishingFeatures} onChange={(event) => update('distinguishingFeatures', event.target.value)} placeholder="Scratches, markings, accessories" /></label></div> }
 function PartyStep({ draft, update }: { draft: TransactionDraft; update: <K extends keyof TransactionDraft>(key: K, value: TransactionDraft[K]) => void }) { return <div className="flow-body"><h2>Record both parties</h2><p>National ID is the primary identifier. Capture contact and local area details for each participant.</p><PartyFields label="Seller (outbound)" prefix="seller" draft={draft} update={update} /><PartyFields label="Buyer (inbound)" prefix="buyer" draft={draft} update={update} /><label>Reason for transfer or mismatch<textarea value={draft.reason} onChange={(event) => update('reason', event.target.value)} placeholder="Required when seller differs from current owner" /></label><div className="price-fields"><label>Bicycle price<input type="number" min="0" value={draft.bicyclePrice} onChange={(event) => update('bicyclePrice', event.target.value)} placeholder="0.00" /></label><label>Service fee<input type="number" min="0" value={draft.serviceFee} onChange={(event) => update('serviceFee', event.target.value)} /></label></div></div> }
 function PartyFields({ label, prefix, draft, update }: { label: string; prefix: 'seller' | 'buyer'; draft: TransactionDraft; update: <K extends keyof TransactionDraft>(key: K, value: TransactionDraft[K]) => void }) {
   const [lookupState, setLookupState] = useState<'idle' | 'checking' | 'found' | 'missing'>('idle')
@@ -631,25 +645,27 @@ function RegisterScreen({ saved, onSave, onCancel, onViewOwner }: { saved: boole
   const [personQuery, setPersonQuery] = useState('')
   const [personChecked, setPersonChecked] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [serialLocked, setSerialLocked] = useState(false)
   const [newPerson, setNewPerson] = useState({ name: '', nationalId: '', phone: '', cell: '', sector: '', village: '' })
   const updateBicycle = (key: keyof Omit<RegistrationDraft, 'person'>, value: string) => setDraft((current) => ({ ...current, [key]: value }))
   const updatePerson = (key: keyof typeof newPerson, value: string) => setNewPerson((current) => ({ ...current, [key]: value }))
-  const verifySerial = async () => {
+  const verifySerial = async (): Promise<{ owner: PersonRecord | null }> => {
     const normalized = draft.frameNumber.trim()
-    if (!normalized) return
+    if (!normalized) { setSerialChecked(true); setSerialOwner(null); setSerialConfirmed(false); return { owner: null } }
     setSerialChecked(false)
+    let owner: PersonRecord | null = null
     try {
       const result = await api.listBicycles(normalized)
       const match = result.data.find((b) => b.frameNumber.toLowerCase() === normalized.toLowerCase())
-      const owner = match?.currentOwner ? { id: match.currentOwner.id, name: match.currentOwner.name, nationalId: (match.currentOwner as api.Person).nationalId ?? '', phone: (match.currentOwner as api.Person).phone ?? '', cell: (match.currentOwner as api.Person).cell ?? '', sector: (match.currentOwner as api.Person).sector ?? '', village: (match.currentOwner as api.Person).village ?? '' } : null
-      setSerialOwner(owner)
+      owner = match?.currentOwner ? { id: match.currentOwner.id, name: match.currentOwner.name, nationalId: (match.currentOwner as api.Person).nationalId ?? '', phone: (match.currentOwner as api.Person).phone ?? '', cell: (match.currentOwner as api.Person).cell ?? '', sector: (match.currentOwner as api.Person).sector ?? '', village: (match.currentOwner as api.Person).village ?? '' } : null
     } catch {
       const cachedBicycle = (await db.cachedBicycles.toArray()).find((r) => ((r.data as { frameNumber?: string }).frameNumber ?? '').toLowerCase() === normalized.toLowerCase())
       const cachedOwnerId = cachedBicycle ? (cachedBicycle.data as { currentOwnerId?: string }).currentOwnerId : undefined
       const cachedOwner = cachedOwnerId ? (await db.cachedPeople.get(cachedOwnerId))?.data as PersonRecord | undefined : undefined
-      setSerialOwner(cachedOwner ?? null)
+      owner = cachedOwner ?? null
     }
-    setSerialConfirmed(false); setSerialChecked(true)
+    setSerialOwner(owner); setSerialConfirmed(false); setSerialChecked(true)
+    return { owner }
   }
   const findPerson = async () => {
     setPersonChecked(true)
@@ -688,11 +704,20 @@ function RegisterScreen({ saved, onSave, onCancel, onViewOwner }: { saved: boole
   const person = draft.person
   return <section className="flow-screen"><div className="stepper">{steps.map((label, index) => <span key={label} className={index <= (phase === 'serial' ? 0 : phase === 'bicycle' ? 1 : phase === 'person-search' || phase === 'person-new' ? 2 : 3) ? 'current' : ''}><i>{index + 1}</i><small>{label}</small></span>)}</div>
     {phase === 'serial' && <div className="flow-body"><h2>Verify bicycle serial</h2><p>Check the database before creating a registration. A bicycle serial can only be registered once.</p><label>Frame serial number<div className="serial-input"><QrCode size={16} /><input value={draft.frameNumber} onChange={(event) => { updateBicycle('frameNumber', event.target.value); setSerialChecked(false); setSerialOwner(null); setSerialConfirmed(false) }} placeholder="E.G. ABT-2024-00918" /><Smartphone size={16} /></div></label><button className="secondary-button" onClick={() => void verifySerial()}><Search size={15} /> Check bicycle database</button>{serialChecked && serialOwner && <div className="duplicate-warning"><ShieldAlert size={17} /><span><strong>Serial already registered</strong><small>This bicycle is linked to {serialOwner.name}. Resolve this issue before continuing.</small><button className="owner-details-link" onClick={() => onViewOwner(serialOwner)}>View owner details <ArrowRight size={12} /></button><div className="owner-details"><b>{serialOwner.name}</b><small>{serialOwner.nationalId} · {serialOwner.phone}</small><small>{serialOwner.sector} · {serialOwner.village}</small></div></span><div className="duplicate-actions">{serialConfirmed ? <Check className="confirmation-check" size={17} /> : <button className="confirm-warning" onClick={() => setSerialConfirmed(true)}>Issue resolved</button>}<button className="use-bicycle-btn" onClick={() => setPhase('person-search')}>Use this bicycle <ArrowRight size={12} /></button></div></div>}{serialChecked && !serialOwner && <div className="verification-result not-found"><Check size={15} /><span><strong>Serial available</strong><small>No bicycle record was found. Continue to capture the bicycle.</small></span></div>}</div>}
-    {phase === 'bicycle' && <div className="flow-body"><h2>Record bicycle details</h2><p>This serial is new. Capture the bicycle before linking its current owner.</p><div className="capture-summary"><span>Frame serial<strong>{draft.frameNumber}</strong></span><span className="not-found-label">Available to register</span></div><div className="two-fields"><label>Brand<input value={draft.brand} onChange={(event) => updateBicycle('brand', event.target.value)} placeholder="e.g. Trek" /></label><label>Model<input value={draft.model} onChange={(event) => updateBicycle('model', event.target.value)} placeholder="e.g. Marlin 7" /></label></div><div className="two-fields"><label>Color<input value={draft.color} onChange={(event) => updateBicycle('color', event.target.value)} placeholder="e.g. black" /></label><label>Photo reference<input placeholder="Optional photo ID" /></label></div><label>Distinguishing features<textarea value={draft.features} onChange={(event) => updateBicycle('features', event.target.value)} placeholder="Scratches, markings, accessories" /></label></div>}
+    {phase === 'bicycle' && <div className="flow-body"><h2>Record bicycle details</h2><p>Capture the bicycle before linking its current owner.</p>{serialLocked ? <div className="capture-summary"><span>Frame serial<strong>{draft.frameNumber}</strong></span><span className="not-found-label">Available to register</span></div> : <label>Frame serial number<div className="serial-input"><QrCode size={16} /><input value={draft.frameNumber} onChange={(event) => updateBicycle('frameNumber', event.target.value)} onBlur={() => { if (draft.frameNumber.trim()) setSerialLocked(true) }} placeholder="E.G. ABT-2024-00918" /></div></label>}<div className="two-fields"><label>Brand<input value={draft.brand} onChange={(event) => updateBicycle('brand', event.target.value)} placeholder="e.g. Trek" /></label><label>Model<input value={draft.model} onChange={(event) => updateBicycle('model', event.target.value)} placeholder="e.g. Marlin 7" /></label></div><div className="two-fields"><label>Color<input value={draft.color} onChange={(event) => updateBicycle('color', event.target.value)} placeholder="e.g. black" /></label><label>Photo reference<input placeholder="Optional photo ID" /></label></div><label>Distinguishing features<textarea value={draft.features} onChange={(event) => updateBicycle('features', event.target.value)} placeholder="Scratches, markings, accessories" /></label></div>}
     {phase === 'person-search' && <div className="flow-body"><h2>Find current owner</h2><p>Search by name or national ID. National ID is the primary person identifier.</p><label>Name or national ID<div className="search-field"><Search size={15} /><input value={personQuery} onChange={(event) => setPersonQuery(event.target.value)} placeholder="Search person in database" /></div></label><button className="secondary-button" onClick={findPerson}><Search size={15} /> Find person</button>{personChecked && person && <div className="person-found"><Check size={16} /><span><strong>{person.name}</strong><small>{person.nationalId} · {person.phone}</small><small>{person.sector} · {person.village}</small></span></div>}{personChecked && !person && <div className="person-not-found"><UserRound size={16} /><span><strong>Person not found</strong><small>No person matches this search. Add the owner to the database.</small></span><button onClick={() => setPhase('person-new')}>Add new person <ArrowRight size={14} /></button></div>}</div>}
     {phase === 'person-new' && <div className="flow-body"><h2>Add person to database</h2><p>Create the owner record first, then it will be linked to this bicycle registration.</p><label>Full name<input value={newPerson.name} onChange={(event) => updatePerson('name', event.target.value)} placeholder="Full legal name" /></label><label>National ID (16 characters)<input value={newPerson.nationalId} maxLength={16} onChange={(event) => updatePerson('nationalId', event.target.value)} placeholder="Enter 16-character national ID" /></label><div className="two-fields"><label>Phone<input value={newPerson.phone} onChange={(event) => updatePerson('phone', event.target.value)} placeholder="Primary phone" /></label><label>Cell<input value={newPerson.cell} onChange={(event) => updatePerson('cell', event.target.value)} placeholder="Cell number" /></label></div><div className="two-fields"><label>Sector<input value={newPerson.sector} onChange={(event) => updatePerson('sector', event.target.value)} placeholder="Sector" /></label><label>Village<input value={newPerson.village} onChange={(event) => updatePerson('village', event.target.value)} placeholder="Village" /></label></div></div>}
     {phase === 'review' && <div className="flow-body"><h2>Review registration</h2><p>Confirm the bicycle and its linked current owner before saving.</p><div className="review-summary"><span>Bicycle<strong>{draft.brand || 'New'} {draft.model || 'bicycle'} · {draft.frameNumber}</strong></span><span>Owner<strong>{person?.name}</strong></span><span>National ID<strong>{person?.nationalId}</strong></span><span>Location<strong>{person?.sector} · {person?.village}</strong></span></div><div className="audit-note"><ShieldCheck size={15} /> Registration and owner link will be audited.</div></div>}
-    <div className="flow-actions"><button className="quiet-button" onClick={phase === 'serial' ? onCancel : () => setPhase(phase === 'person-new' ? 'person-search' : phase === 'review' ? 'person-search' : phase === 'person-search' ? 'bicycle' : 'serial')}>Back</button><button className="action-button" disabled={(phase === 'serial' && (!serialChecked || (Boolean(serialOwner) && !serialConfirmed))) || (phase === 'person-search' && !person) || (phase === 'person-new' && (!newPerson.name || newPerson.nationalId.length !== 16)) || isSaving} onClick={() => { if (phase === 'serial') setPhase(serialOwner ? 'person-search' : 'bicycle'); else if (phase === 'bicycle') setPhase('person-search'); else if (phase === 'person-search') setPhase('review'); else if (phase === 'person-new') { setDraft((current) => ({ ...current, person: { id: `person-${newPerson.nationalId}`, ...newPerson } })); setPhase('review') } else void saveRegistration() }}>{isSaving ? 'Saving...' : phase === 'review' ? 'Save registration' : 'Continue'} <ArrowRight size={15} /></button></div>
+    <div className="flow-actions"><button className="quiet-button" onClick={phase === 'serial' ? onCancel : () => setPhase(phase === 'person-new' ? 'person-search' : phase === 'review' ? 'person-search' : phase === 'person-search' ? 'bicycle' : 'serial')}>Back</button><button className="action-button" disabled={(phase === 'person-search' && !person) || (phase === 'person-new' && (!newPerson.name || newPerson.nationalId.length !== 16)) || isSaving} onClick={() => void (async () => {
+      if (phase === 'serial') {
+        if (serialChecked && serialOwner && !serialConfirmed) return // duplicate not yet acknowledged
+        setSerialLocked(!!draft.frameNumber.trim())
+        setPhase(serialChecked && serialOwner ? 'person-search' : 'bicycle')
+      } else if (phase === 'bicycle') setPhase('person-search')
+      else if (phase === 'person-search') setPhase('review')
+      else if (phase === 'person-new') { setDraft((current) => ({ ...current, person: { id: `person-${newPerson.nationalId}`, ...newPerson } })); setPhase('review') }
+      else void saveRegistration()
+    })()}>{isSaving ? 'Saving...' : phase === 'review' ? 'Save registration' : 'Continue'} <ArrowRight size={15} /></button></div>
   </section>
 }
 function Success({ title, copy, onDone }: { title: string; copy: string; onDone: () => void }) {
