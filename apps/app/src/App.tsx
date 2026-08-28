@@ -1,6 +1,6 @@
 ﻿import { useState, useEffect, type ReactNode } from 'react'
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from '@tanstack/react-query'
-import { Activity, ArrowLeft, ArrowRight, Bike, CalendarDays, Check, ChevronRight, Cloud, Database, Eye, FileText, Flag, Home, LockKeyhole, MapPin, Plus, QrCode, Search, Send, Settings, ShieldAlert, ShieldCheck, Signal, Smartphone, Trash2, TrendingUp, Type, UserRound, Users, Wifi, X } from 'lucide-react'
+import { Activity, ArrowLeft, ArrowRight, Bike, CalendarDays, Check, ChevronRight, Cloud, Database, Eye, FileText, Flag, Home, LockKeyhole, MapPin, Plus, QrCode, Search, Send, Settings, ShieldAlert, ShieldCheck, Signal, Smartphone, Trash2, TrendingUp, Type, UserRound, Users, Wifi, WifiOff, X } from 'lucide-react'
 import { type BicycleRecord, type PersonRecord, mockUser } from './mock/data'
 import { db } from './lib/db'
 import * as api from './lib/api'
@@ -80,7 +80,7 @@ export default function App() {
       {screen !== 'home' && screen !== 'admin-home' && <button className="back-button" onClick={() => go(screen === 'details' ? detailsOrigin : screen === 'transaction-record' ? transactionOrigin : screen === 'person-activity' ? (role === 'ADMIN' ? 'registry-profile' : 'people') : screen === 'register' ? registerOrigin : screen === 'ownership-chain' ? 'bicycle-inventory' : screen === 'profile' ? profileOrigin() : role === 'ADMIN' ? 'admin-home' : 'home')} aria-label="Go back"><ArrowLeft size={17} /></button>}
       <strong>{screenTitle(screen)}</strong>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span className="wifi-badge" title="Online"><Wifi size={14} /></span>
+        <span className="wifi-badge" title={isOnline ? 'Online' : 'Offline'} style={{ color: isOnline ? '#4caf7d' : '#e05' }}>{isOnline ? <Wifi size={14} /> : <WifiOff size={14} />}</span>
         <button className="settings-icon-btn" onClick={() => go('profile')} aria-label="Profile settings"><Settings size={16} /></button>
       </div>
     </header>
@@ -194,6 +194,7 @@ function Login({ onLogin, onForgot }: { onLogin: (user: { id: string; name: stri
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [showPassword, setShowPassword] = useState(false)
   const submit = async () => {
     if (!email || !password) return
     setLoading(true); setError(null)
@@ -205,7 +206,7 @@ function Login({ onLogin, onForgot }: { onLogin: (user: { id: string; name: stri
     <div className="login-hero"><div className="hero-bike"><Bike size={22} /></div><strong>CycleTrack</strong><small>FIELD AGENT TERMINAL</small></div>
     <section className="login-panel"><p className="screen-kicker">SECURE ENTRY</p><p className="login-copy">Authorized personnel only.</p>
       <label><span><Smartphone size={12} /> Email</span><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="agent@example.com" /></label>
-      <label><span><LockKeyhole size={12} /> Password</span><div className="password-input"><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} /><Eye size={15} /></div></label>
+      <label><span><LockKeyhole size={12} /> Password</span><div className="password-input"><input type={showPassword ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} /><Eye size={15} style={{ cursor: 'pointer', flexShrink: 0 }} onClick={() => setShowPassword((v) => !v)} /></div></label>
       {error && <p className="error-text" style={{color:'#e05'}}>{error}</p>}
       <button className="action-button" disabled={loading || !email || !password} onClick={() => void submit()}>{loading ? 'Signing in...' : 'Initialize terminal'} <ArrowRight size={16} /></button>
       <button className="quiet-button" style={{ marginTop: 12 }} onClick={onForgot}>Forgot password?</button>
@@ -791,7 +792,14 @@ function DetailsScreen({ record }: { record: BicycleRecord }) {
       <div><small>Owner</small><strong>{registration.owner.name}</strong><PersonExpandable person={registration.owner} /></div>
       <div><small>Recorded by</small><strong>{registration.recordingAgent.name}</strong></div></div></> }
     <div className="location-card"><MapPin size={17} /><span><small>Status</small><strong>{bike?.status ?? '—'}</strong></span></div>
-    <button className="action-button export-button"><Send size={14} /> Export certified record (PDF)</button>
+    <button className="action-button export-button" onClick={() => {
+      const w = window.open('', '_blank')
+      if (!w) return
+      w.document.write(`<!DOCTYPE html><html><head><title>Record – ${record.frameNumber}</title><style>body{font-family:monospace;padding:32px;color:#111}h1{font-size:18px;margin-bottom:4px}p{margin:4px 0;font-size:13px}.row{display:flex;gap:16px;margin:4px 0}.label{color:#666;font-size:11px;text-transform:uppercase;min-width:120px}hr{margin:16px 0;border:none;border-top:1px solid #ccc}@media print{body{padding:16px}}</style></head><body><h1>Certified Bicycle Record</h1><p style="color:#666;font-size:11px">Generated ${new Date().toLocaleString()}</p><hr/><div class="row"><span class="label">Frame Serial</span><strong>${record.frameNumber}</strong></div><div class="row"><span class="label">Bicycle</span><span>${record.name}</span></div><div class="row"><span class="label">Color</span><span>${record.color}</span></div><div class="row"><span class="label">Current Owner</span><span>${record.owner}</span></div><div class="row"><span class="label">Status</span><span>${record.status}</span></div>${bike ? `<div class="row"><span class="label">Brand / Model</span><span>${bike.brand ?? '—'} ${bike.model ?? ''}</span></div>` : ''}${lastTx ? `<hr/><h2 style="font-size:14px">Last Transaction · ${lastTx.transactionId}</h2><div class="row"><span class="label">Date</span><span>${new Date(lastTx.transactionDate).toLocaleString()}</span></div><div class="row"><span class="label">Type</span><span>${lastTx.type}</span></div><div class="row"><span class="label">Seller</span><span>${lastTx.seller?.name ?? '—'}</span></div><div class="row"><span class="label">Buyer</span><span>${lastTx.buyer?.name ?? '—'}</span></div><div class="row"><span class="label">Recorded by</span><span>${lastTx.recordingAgent.name}</span></div>` : ''}${registration ? `<hr/><h2 style="font-size:14px">Registration</h2><div class="row"><span class="label">Date</span><span>${new Date(registration.createdAt).toLocaleString()}</span></div><div class="row"><span class="label">Owner</span><span>${registration.owner.name}</span></div><div class="row"><span class="label">Recorded by</span><span>${registration.recordingAgent.name}</span></div>` : ''}<hr/><p style="font-size:10px;color:#999">AbatCO Bicycle Records — certified field record</p></body></html>`)
+      w.document.close()
+      w.focus()
+      setTimeout(() => { w.print(); w.close() }, 300)
+    }}><Send size={14} /> Export certified record (PDF)</button>
   </section>
 }
 
