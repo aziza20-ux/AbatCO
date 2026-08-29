@@ -7,7 +7,7 @@ export default defineConfig({
       registerType: 'autoUpdate',
       manifest: {
         name: 'CycleTrack',
-        short_name: 'AbatCo',
+        short_name: 'CycleTrack',
         start_url: '/',
         display: 'standalone',
         theme_color: '#2f6f4e',
