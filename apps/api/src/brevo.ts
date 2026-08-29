@@ -1,21 +1,19 @@
-import nodemailer from 'nodemailer'
-
-const transporter = nodemailer.createTransport({
-  host: 'smtp-relay.brevo.com',
-  port: 465,
-  secure: true,
-  auth: {
-    user: process.env.BREVO_SMTP_USER!,
-    pass: process.env.BREVO_SMTP_PASS!,
-  },
-})
-
 export async function sendOtpEmail(toEmail: string, toName: string, otp: string) {
-  await transporter.sendMail({
-    from: `"${process.env.BREVO_SENDER_NAME}" <${process.env.BREVO_SENDER_EMAIL}>`,
-    to: `"${toName}" <${toEmail}>`,
-    subject: 'Your password reset code',
-    html: `
+  const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      'accept': 'application/json',
+      'api-key': process.env.BREVO_API_KEY!,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      sender: {
+        name: process.env.BREVO_SENDER_NAME,
+        email: process.env.BREVO_SENDER_EMAIL,
+      },
+      to: [{ email: toEmail, name: toName }],
+      subject: 'Your password reset code',
+      htmlContent: `
       <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">
         <h2 style="margin:0 0 8px">Password reset</h2>
         <p style="color:#555;margin:0 0 24px">Use the code below to reset your AbatCO password. It expires in 15 minutes.</p>
@@ -23,5 +21,11 @@ export async function sendOtpEmail(toEmail: string, toName: string, otp: string)
         <p style="color:#999;font-size:12px;margin:24px 0 0">If you did not request this, ignore this email.</p>
       </div>
     `,
+    }),
   })
+
+  if (!response.ok) {
+    const error = await response.text()
+    throw new Error(`Brevo API error ${response.status}: ${error}`)
+  }
 }
