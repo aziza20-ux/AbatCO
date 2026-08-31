@@ -1,23 +1,22 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { ArrowRight, Check, CircleCheck, Clock3, FileCheck2, Menu, ScanLine, ShieldCheck, X } from 'lucide-react'
+import { useTranslation, type Lang } from './i18n/useTranslation'
+import type { TranslationKey } from './i18n/en'
 
 type Screen = 'home' | 'how-it-works' | 'about' | 'contact'
 
-const screens: { id: Screen; label: string }[] = [
-  { id: 'home', label: 'Home' },
-  { id: 'how-it-works', label: 'How It Works' },
-  { id: 'about', label: 'About / Trust' },
-  { id: 'contact', label: 'Contact' },
-]
+const screenIds: Screen[] = ['home', 'how-it-works', 'about', 'contact']
+const navKeys: TranslationKey[] = ['nav.home', 'nav.howItWorks', 'nav.about', 'nav.contact']
 
 const pageFromHash = (): Screen => {
   const hash = window.location.hash.replace('#/', '') as Screen
-  return screens.some((screen) => screen.id === hash) ? hash : 'home'
+  return screenIds.includes(hash) ? hash : 'home'
 }
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>(pageFromHash)
   const [menuOpen, setMenuOpen] = useState(false)
+  const { lang, setLang, t } = useTranslation()
 
   const navigate = (next: Screen) => {
     setScreen(next)
@@ -33,40 +32,62 @@ export default function App() {
     return () => { window.removeEventListener('popstate', syncScreen); window.removeEventListener('hashchange', syncScreen) }
   }, [])
 
+  const otherLang: Lang = lang === 'en' ? 'rw' : 'en'
+
   return <div className="public-site">
     <header className="site-header">
-      <button className="site-logo" onClick={() => navigate('home')} aria-label="Cycletrack home"><img src="/icons/icon-192.png" alt="Cycletrack" className="logo-icon" /><span>Cycle<span>track</span></span></button>
-      <nav className={menuOpen ? 'site-nav open' : 'site-nav'}>{screens.map(({ id, label }) => <button className={screen === id ? 'active' : ''} key={id} onClick={() => navigate(id)}>{label}</button>)}</nav>
-      <div className="header-actions"><button className="header-cta" onClick={() => navigate('contact')}>Get Started <ArrowRight size={13} /></button></div>
-      <button className="menu-toggle" onClick={() => setMenuOpen((open) => !open)} aria-label="Toggle navigation">{menuOpen ? <X size={20} /> : <Menu size={20} />}</button>
+      <button className="site-logo" onClick={() => navigate('home')} aria-label={t('header.logoLabel')}><img src="/icons/icon-192.png" alt="Cycletrack" className="logo-icon" /><span>Cycle<span>track</span></span></button>
+      <nav className={menuOpen ? 'site-nav open' : 'site-nav'}>
+        {screenIds.map((id, i) => <button className={screen === id ? 'active' : ''} key={id} onClick={() => navigate(id)}>{t(navKeys[i])}</button>)}
+        <button className="lang-switch-mobile" onClick={() => setLang(otherLang)}>{t(('lang.' + otherLang) as TranslationKey)}</button>
+      </nav>
+      <div className="header-actions">
+        <button className="lang-switch" onClick={() => setLang(otherLang)} aria-label={t(('lang.' + otherLang) as TranslationKey)}>{t(('lang.' + otherLang) as TranslationKey)}</button>
+        <button className="header-cta" onClick={() => navigate('contact')}>{t('header.getStarted')} <ArrowRight size={13} /></button>
+      </div>
+      <button className="menu-toggle" onClick={() => setMenuOpen((open) => !open)} aria-label={t('header.toggleNav')}>{menuOpen ? <X size={20} /> : <Menu size={20} />}</button>
     </header>
-    {screen === 'home' && <Home onNavigate={navigate} />}
-    {screen === 'how-it-works' && <HowItWorks onNavigate={navigate} />}
-    {screen === 'about' && <AboutTrust onNavigate={navigate} />}
-    {screen === 'contact' && <Contact onNavigate={navigate} />}
-    <Footer onNavigate={navigate} />
+    {screen === 'home' && <Home onNavigate={navigate} t={t} />}
+    {screen === 'how-it-works' && <HowItWorks onNavigate={navigate} t={t} />}
+    {screen === 'about' && <AboutTrust onNavigate={navigate} t={t} />}
+    {screen === 'contact' && <Contact t={t} />}
+    <Footer onNavigate={navigate} t={t} />
   </div>
 }
 
-function Home({ onNavigate }: { onNavigate: (screen: Screen) => void }) {
+type T = (key: TranslationKey) => string
+
+function Home({ onNavigate, t }: { onNavigate: (screen: Screen) => void; t: T }) {
   return <>
     <main>
-      <section className="hero home-hero"><div className="hero-copy"><p className="eyebrow">Independent bicycle records</p><h1>Record the<br /><em>transaction.</em><br /><span>Verify the ownership.</span></h1><p className="hero-text">Cycletrack provides an independent, secure record of bicycle ownership history. Keep every handover clear, searchable, and trusted.</p><div className="hero-actions"><button className="solid-button" onClick={() => onNavigate('contact')}>Start a record <ArrowRight size={15} /></button><button className="outline-button" onClick={() => onNavigate('how-it-works')}>How it works</button></div><div className="hero-proof"><span><strong>14,282</strong><small>records kept</small></span><span><strong>98.4%</strong><small>verified activity</small></span></div></div><div className="hero-image"><span className="image-caption">Asset record / 04.24</span></div></section>
-      <section className="trust-strip"><div><ShieldCheck /><strong>Neutral record keeper</strong><small>We document ownership. We do not sell bicycles.</small></div><div><FileCheck2 /><strong>Verified handovers</strong><small>Clear records for every transfer.</small></div><div><Clock3 /><strong>Built for the field</strong><small>Online or offline, your record stays yours.</small></div></section>
-      <section className="section process-section"><div className="section-heading"><p className="eyebrow">The verification process</p><h2>A clearer chain of custody.</h2><button className="text-link" onClick={() => onNavigate('how-it-works')}>See the full process <ArrowRight size={14} /></button></div><div className="process-grid"><ProcessCard number="01" title="Record once" copy="Capture the bicycle, owner and transaction details in one trusted record." imageClass="closeup" /><ProcessCard number="02" title="Verify together" copy="Both parties review the details before the record is sealed." imageClass="desk" /><ProcessCard number="03" title="Search anytime" copy="Find a bicycle's history when you need clarity, online or offline." imageClass="workshop" /></div></section>
-      <section className="split-promo"><div className="promo-image"></div><div><p className="eyebrow">For manufacturers and enthusiasts</p><h2>Built for the people who keep bicycles moving.</h2><p>From a first registration to a decade of handovers, CycleLedger keeps the important details visible without taking ownership away from the people involved.</p><ul><li><Check size={14} /> A neutral, shared record</li><li><Check size={14} /> Designed for real-world verification</li><li><Check size={14} /> Auditable by design</li></ul></div></section>
-      <section className="cta-band"><p className="eyebrow">Start with a record</p><h2>Give every bicycle<br />a trusted history.</h2><p>Join the record-keeping network built around clarity, not commerce.</p><button className="solid-button" onClick={() => onNavigate('contact')}>Create a secure record <ArrowRight size={15} /></button></section>
+      <section className="hero home-hero"><div className="hero-copy"><p className="eyebrow">{t('home.hero.eyebrow')}</p><h1>{t('home.hero.heading1')}<br /><em>{t('home.hero.heading2')}</em><br /><span>{t('home.hero.heading3')}</span></h1><p className="hero-text">{t('home.hero.text')}</p><div className="hero-actions"><button className="solid-button" onClick={() => onNavigate('contact')}>{t('home.hero.cta')} <ArrowRight size={15} /></button><button className="outline-button" onClick={() => onNavigate('how-it-works')}>{t('home.hero.howItWorks')}</button></div><div className="hero-proof"><span><strong>{t('home.hero.stat1Value')}</strong><small>{t('home.hero.stat1Label')}</small></span><span><strong>{t('home.hero.stat2Value')}</strong><small>{t('home.hero.stat2Label')}</small></span></div></div><div className="hero-image"><span className="image-caption">{t('home.hero.imageCaption')}</span></div></section>
+      <section className="trust-strip"><div><ShieldCheck /><strong>{t('home.trust.neutral.title')}</strong><small>{t('home.trust.neutral.copy')}</small></div><div><FileCheck2 /><strong>{t('home.trust.verified.title')}</strong><small>{t('home.trust.verified.copy')}</small></div><div><Clock3 /><strong>{t('home.trust.field.title')}</strong><small>{t('home.trust.field.copy')}</small></div></section>
+      <section className="section process-section"><div className="section-heading"><p className="eyebrow">{t('home.process.eyebrow')}</p><h2>{t('home.process.heading')}</h2><button className="text-link" onClick={() => onNavigate('how-it-works')}>{t('home.process.link')} <ArrowRight size={14} /></button></div><div className="process-grid"><ProcessCard number={t('home.process.card1.number')} title={t('home.process.card1.title')} copy={t('home.process.card1.copy')} imageClass="closeup" /><ProcessCard number={t('home.process.card2.number')} title={t('home.process.card2.title')} copy={t('home.process.card2.copy')} imageClass="desk" /><ProcessCard number={t('home.process.card3.number')} title={t('home.process.card3.title')} copy={t('home.process.card3.copy')} imageClass="workshop" /></div></section>
+      <section className="split-promo"><div className="promo-image"></div><div><p className="eyebrow">{t('home.promo.eyebrow')}</p><h2>{t('home.promo.heading')}</h2><p>{t('home.promo.copy')}</p><ul><li><Check size={14} /> {t('home.promo.li1')}</li><li><Check size={14} /> {t('home.promo.li2')}</li><li><Check size={14} /> {t('home.promo.li3')}</li></ul></div></section>
+      <section className="cta-band"><p className="eyebrow">{t('home.cta.eyebrow')}</p><h2>{t('home.cta.heading1')}<br />{t('home.cta.heading2')}</h2><p>{t('home.cta.copy')}</p><button className="solid-button" onClick={() => onNavigate('contact')}>{t('home.cta.button')} <ArrowRight size={15} /></button></section>
     </main>
   </>
 }
 
 function ProcessCard({ number, title, copy, imageClass }: { number: string; title: string; copy: string; imageClass: string }) { return <article className="process-card"><div className={`process-image ${imageClass}`}><span>{number}</span></div><div><h3>{title}</h3><p>{copy}</p></div></article> }
 
-function HowItWorks({ onNavigate }: { onNavigate: (screen: Screen) => void }) { const steps = [['01', 'Register the bicycle', 'Capture its frame number, details, photographs and current owner.'], ['02', 'Verify the parties', 'Record the people involved and surface mismatches before they become disputes.'], ['03', 'Seal the handover', 'Both parties review the record. The event becomes part of the bicycle history.'], ['04', 'Search with confidence', 'Find a clear, chronological history whenever the bicycle changes hands.']]; return <main className="inner-page"><section className="page-intro"><p className="eyebrow">A record, not a marketplace</p><h1>The immutable<br /><span>ledger for your ride.</span></h1><p>Every bicycle carries a story. We make that story legible, verifiable, and ready when you need it.</p><button className="solid-button" onClick={() => onNavigate('contact')}>Start a secure record <ArrowRight size={15} /></button></section><section className="steps-section"><div className="section-heading centered"><p className="eyebrow">Four steps to clarity</p><h2>From frame number to trusted history.</h2><p>A simple workflow for agents, owners and every person in between.</p></div><div className="steps-list">{steps.map(([number, title, copy], index) => <article className={index % 2 ? 'step-row reverse' : 'step-row'} key={number}><div className={`step-art step-${number}`}><ScanLine size={25} /></div><div className="step-copy"><span>{number}</span><h2>{title}</h2><p>{copy}</p></div></article>)}</div></section><section className="quote-strip"><strong>“</strong><p>Trust is not a claim. It is a record of what happened, kept carefully over time.</p></section></main> }
+function HowItWorks({ onNavigate, t }: { onNavigate: (screen: Screen) => void; t: T }) {
+  const steps: [TranslationKey, TranslationKey][] = [
+    ['hiw.step1.title', 'hiw.step1.copy'],
+    ['hiw.step2.title', 'hiw.step2.copy'],
+    ['hiw.step3.title', 'hiw.step3.copy'],
+    ['hiw.step4.title', 'hiw.step4.copy'],
+  ]
+  const numbers = ['01', '02', '03', '04']
+  return <main className="inner-page"><section className="page-intro"><p className="eyebrow">{t('hiw.eyebrow')}</p><h1>{t('hiw.heading1')}<br /><span>{t('hiw.heading2')}</span></h1><p>{t('hiw.copy')}</p><button className="solid-button" onClick={() => onNavigate('contact')}>{t('hiw.cta')} <ArrowRight size={15} /></button></section><section className="steps-section"><div className="section-heading centered"><p className="eyebrow">{t('hiw.steps.eyebrow')}</p><h2>{t('hiw.steps.heading')}</h2><p>{t('hiw.steps.subheading')}</p></div><div className="steps-list">{steps.map(([titleKey, copyKey], index) => <article className={index % 2 ? 'step-row reverse' : 'step-row'} key={numbers[index]}><div className={`step-art step-0${index + 1}`}><ScanLine size={25} /></div><div className="step-copy"><span>{numbers[index]}</span><h2>{t(titleKey)}</h2><p>{t(copyKey)}</p></div></article>)}</div></section><section className="quote-strip"><strong>"</strong><p>{t('hiw.quote')}</p></section></main>
+}
 
-function AboutTrust({ onNavigate }: { onNavigate: (screen: Screen) => void }) { return <main className="inner-page about-page"><section className="about-hero"><div><p className="eyebrow">The Cycletrack standard</p><h1>Trust has a<br /><span>paper trail.</span></h1><p>We are building the neutral infrastructure for bicycle ownership records: independent, practical, and accountable.</p></div><div className="about-art"><CircleCheck size={44} /></div></section><section className="trust-principles"><div className="section-heading centered"><p className="eyebrow">What we stand for</p><h2>Useful records. Honest context.</h2></div><div className="principle-grid"><Principle icon={<ShieldCheck />} title="Neutral by design" copy="CycleLedger is not a marketplace. We never broker a sale or decide who owns a bicycle." /><Principle icon={<FileCheck2 />} title="Auditable by default" copy="Important actions have a traceable place in the record, so the history can be understood later." /><Principle icon={<CircleCheck />} title="Human-first verification" copy="A mismatch is surfaced as a warning, not hidden or silently overwritten." /></div></section><section className="about-callout"><p className="eyebrow">Our promise</p><h2>Clarity at every handover.</h2><p>We make the tools, protocols and context available so people can make informed decisions about the bicycles in front of them.</p><button className="outline-button" onClick={() => onNavigate('contact')}>Talk to the team</button></section></main> }
+function AboutTrust({ onNavigate, t }: { onNavigate: (screen: Screen) => void; t: T }) { return <main className="inner-page about-page"><section className="about-hero"><div><p className="eyebrow">{t('about.eyebrow')}</p><h1>{t('about.heading1')}<br /><span>{t('about.heading2')}</span></h1><p>{t('about.copy')}</p></div><div className="about-art"><CircleCheck size={44} /></div></section><section className="trust-principles"><div className="section-heading centered"><p className="eyebrow">{t('about.principles.eyebrow')}</p><h2>{t('about.principles.heading')}</h2></div><div className="principle-grid"><Principle icon={<ShieldCheck />} title={t('about.p1.title')} copy={t('about.p1.copy')} /><Principle icon={<FileCheck2 />} title={t('about.p2.title')} copy={t('about.p2.copy')} /><Principle icon={<CircleCheck />} title={t('about.p3.title')} copy={t('about.p3.copy')} /></div></section><section className="about-callout"><p className="eyebrow">{t('about.callout.eyebrow')}</p><h2>{t('about.callout.heading')}</h2><p>{t('about.callout.copy')}</p><button className="outline-button" onClick={() => onNavigate('contact')}>{t('about.callout.button')}</button></section></main> }
 function Principle({ icon, title, copy }: { icon: ReactNode; title: string; copy: string }) { return <article className="principle"><span>{icon}</span><h3>{title}</h3><p>{copy}</p></article> }
 
-function Contact({ onNavigate }: { onNavigate: (screen: Screen) => void }) { return <main className="inner-page contact-page"><section className="contact-intro"><p className="eyebrow">Secure protocol inquiry channel</p><h1>Let's make the<br /><span>record clearer.</span></h1><p>Have a question about the network, field operations or bringing Cycletrack to your organization? Send us a note.</p></section><section className="contact-grid"><aside><p className="eyebrow">Technical ops</p><div className="contact-detail"><strong>General inquiries</strong><span>hello@cycleledger.example</span></div><div className="contact-detail"><strong>Field operations</strong><span>+250782127438</span></div><div className="contact-detail"><strong>Response time</strong><span>Within one business day</span></div></aside></section></main> }
+function Contact({ t }: { t: T }) { return <main className="inner-page contact-page"><section className="contact-intro"><p className="eyebrow">{t('contact.eyebrow')}</p><h1>{t('contact.heading1')}<br /><span>{t('contact.heading2')}</span></h1><p>{t('contact.copy')}</p></section><section className="contact-grid"><aside><p className="eyebrow">{t('contact.ops.eyebrow')}</p><div className="contact-detail"><strong>{t('contact.general.label')}</strong><span>{t('contact.general.value')}</span></div><div className="contact-detail"><strong>{t('contact.field.label')}</strong><span>{t('contact.field.value')}</span></div><div className="contact-detail"><strong>{t('contact.response.label')}</strong><span>{t('contact.response.value')}</span></div></aside></section></main> }
 
-function Footer({ onNavigate }: { onNavigate: (screen: Screen) => void }) { return <footer className="site-footer"><div><button className="site-logo footer-logo" onClick={() => onNavigate('home')}><img src="/icons/icon-192.png" alt="Cycletrack" className="logo-icon" /><span>Cycle<span>track</span></span></button><p>Independent bicycle records<br />for clearer ownership.</p></div><div><strong>Explore</strong><button onClick={() => onNavigate('how-it-works')}>How it works</button><button onClick={() => onNavigate('about')}>About / Trust</button></div><div><strong>Connect</strong><button onClick={() => onNavigate('contact')}>Contact</button><button onClick={() => onNavigate('contact')}>Get started</button></div><small className="copyright">© 2026 Cycletrack. Built for the record.</small></footer> }
+function Footer({ onNavigate, t }: { onNavigate: (screen: Screen) => void; t: T }) {
+  const tagline = t('footer.tagline').split('\n')
+  return <footer className="site-footer"><div><button className="site-logo footer-logo" onClick={() => onNavigate('home')}><img src="/icons/icon-192.png" alt="Cycletrack" className="logo-icon" /><span>Cycle<span>track</span></span></button><p>{tagline[0]}<br />{tagline[1]}</p></div><div><strong>{t('footer.explore')}</strong><button onClick={() => onNavigate('how-it-works')}>{t('footer.howItWorks')}</button><button onClick={() => onNavigate('about')}>{t('footer.about')}</button></div><div><strong>{t('footer.connect')}</strong><button onClick={() => onNavigate('contact')}>{t('footer.contact')}</button><button onClick={() => onNavigate('contact')}>{t('footer.getStarted')}</button></div><small className="copyright">{t('footer.copyright')}</small></footer>
+}
