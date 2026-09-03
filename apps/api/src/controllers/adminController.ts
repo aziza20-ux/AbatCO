@@ -12,7 +12,54 @@ function createTransactionId() {
   return `TXN-${Array.from(crypto.randomBytes(8), (b) => alphabet[b % alphabet.length]).join('')}`
 }
 
-export async function dashboard(_request: AuthRequest, response: Response) { const [bicycles, agents, transactions, flags, priceTotals] = await Promise.all([prisma.bicycle.count(), prisma.user.count({ where: { role: 'AGENT', isActive: true } }), prisma.transaction.count(), prisma.transaction.count({ where: { flagStatus: { in: ['FLAGGED', 'CONFLICTED'] } } }), prisma.transaction.aggregate({ _sum: { price: true, serviceFee: true } })]); return response.json({ data: { bicycles, activeAgents: agents, transactions, flags, totalBicyclePrice: Number(priceTotals._sum.price ?? 0), totalServiceFee: Number(priceTotals._sum.serviceFee ?? 0) } }) }
+export async function dashboard(request: AuthRequest, response: Response) {
+  const query = z.object({
+    dateFilter: z.enum(['all', 'today', 'last30days', 'specific', 'range']).optional(),
+    date: z.string().optional(),
+    startDate: z.string().optional(),
+    endDate: z.string().optional(),
+  }).parse(request.query)
+
+  // Build date range from query params. All boundaries are UTC-midnight of the
+  // submitted date strings, matching PostgreSQL's timestamptz storage used by Prisma.
+  let dateFrom: Date | undefined
+  let dateTo: Date | undefined
+  const filter = query.dateFilter ?? 'all'
+
+  if (filter === 'today') {
+    const now = new Date()
+    dateFrom = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    dateTo = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+  } else if (filter === 'last30days') {
+    const now = new Date()
+    dateTo = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+    dateFrom = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29)
+  } else if (filter === 'specific' && query.date) {
+    const d = new Date(query.date)
+    dateFrom = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+    dateTo = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)
+  } else if (filter === 'range' && query.startDate && query.endDate) {
+    const s = new Date(query.startDate)
+    const e = new Date(query.endDate)
+    dateFrom = new Date(s.getFullYear(), s.getMonth(), s.getDate())
+    dateTo = new Date(e.getFullYear(), e.getMonth(), e.getDate() + 1)
+  }
+
+  const txWhere = dateFrom && dateTo ? { transactionDate: { gte: dateFrom, lt: dateTo } } : {}
+  const regWhere = dateFrom && dateTo ? { createdAt: { gte: dateFrom, lt: dateTo } } : {}
+
+  const [bicycles, agents, transactions, flags, priceTotals] = await Promise.all([
+    filter === 'all'
+      ? prisma.bicycle.count()
+      : prisma.registration.count({ where: regWhere }),
+    prisma.user.count({ where: { role: 'AGENT', isActive: true } }),
+    prisma.transaction.count({ where: txWhere }),
+    prisma.transaction.count({ where: { ...txWhere, flagStatus: { in: ['FLAGGED', 'CONFLICTED'] } } }),
+    prisma.transaction.aggregate({ where: txWhere, _sum: { price: true, serviceFee: true } }),
+  ])
+
+  return response.json({ data: { bicycles, activeAgents: agents, transactions, flags, totalBicyclePrice: Number(priceTotals._sum.price ?? 0), totalServiceFee: Number(priceTotals._sum.serviceFee ?? 0) } })
+}
 export async function listAgents(request: AuthRequest, response: Response) { const query = z.object({ page: z.coerce.number().int().min(1).default(1), limit: z.coerce.number().int().min(1).max(100).default(20) }).parse(request.query); const agents = await prisma.user.findMany({ where: { role: 'AGENT' }, skip: (query.page - 1) * query.limit, take: query.limit, select: { id: true, email: true, name: true, phone: true, isActive: true, permissions: true, createdAt: true, _count: { select: { transactions: true } } }, orderBy: { name: 'asc' } }); return response.json({ data: agents }) }
 export async function createAgent(request: AuthRequest, response: Response) { const input = z.object({ name: z.string().trim().min(1).max(160), email: z.string().email(), phone: z.string().trim().max(40).optional(), password: z.string().min(12).max(200) }).parse(request.body); const user = await prisma.user.create({ data: { name: input.name, email: input.email.toLowerCase(), phone: input.phone, passwordHash: await bcrypt.hash(input.password, 12), role: 'AGENT', permissions: { canRegister: true, canTransfer: true } }, select: { id: true, name: true, email: true, phone: true, role: true, isActive: true, permissions: true } }); await audit(request.user!.id, 'AGENT_CREATED', 'User', user.id); return response.status(201).json({ data: user }) }
 export async function updateAgent(request: AuthRequest, response: Response) { const input = z.object({ name: z.string().trim().min(1).max(160).optional(), email: z.string().email().optional(), phone: z.string().trim().max(40).optional() }).parse(request.body); const agent = await prisma.user.findUnique({ where: { id: String(request.params.id) } }); if (!agent || agent.role !== 'AGENT') return response.status(404).json({ error: { code: 'NOT_FOUND', message: 'Agent not found' } }); const data: Record<string, unknown> = {}; if (input.name) data.name = input.name; if (input.email) data.email = input.email.toLowerCase(); if (input.phone !== undefined) data.phone = input.phone || null; const updated = await prisma.user.update({ where: { id: agent.id }, data, select: { id: true, name: true, email: true, phone: true, isActive: true, permissions: true, createdAt: true, _count: { select: { transactions: true } } } }); await audit(request.user!.id, 'AGENT_UPDATED', 'User', agent.id, { fields: Object.keys(data) }); return response.json({ data: updated }) }

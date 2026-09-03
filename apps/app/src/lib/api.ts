@@ -176,8 +176,10 @@ export async function updateRegistration(id: string, data: { bicycleId?: string;
 export type AgentPermissions = { canRegister?: boolean; canTransfer?: boolean; canFlag?: boolean; canOverride?: boolean }
 export type Agent = { id: string; name: string; email: string; phone?: string; isActive: boolean; createdAt: string; permissions: AgentPermissions; _count: { transactions: number } }
 
-export async function getDashboard() {
-  return apiRequest<ApiEnvelope<{ bicycles: number; activeAgents: number; transactions: number; flags: number; totalBicyclePrice: number; totalServiceFee: number }>>('/admin/dashboard')
+export async function getDashboard(params?: { dateFilter?: 'all' | 'today' | 'last30days' | 'specific' | 'range'; date?: string; startDate?: string; endDate?: string }) {
+  const search = new URLSearchParams(Object.entries(params ?? {}).filter(([, v]) => v != null) as [string, string][])
+  const qs = search.toString() ? `?${search}` : ''
+  return apiRequest<ApiEnvelope<{ bicycles: number; activeAgents: number; transactions: number; flags: number; totalBicyclePrice: number; totalServiceFee: number }>>(`/admin/dashboard${qs}`)
 }
 
 export async function listAgents(page = 1) {

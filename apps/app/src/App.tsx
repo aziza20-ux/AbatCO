@@ -287,13 +287,57 @@ function HomeScreen({ onNavigate, onSelect, pendingCount, isOnline, setRegisterO
 }
 
 function AdminHomeScreen({ onNavigate, onManageProfile, onSetRegisterOrigin }: { onNavigate: (screen: Screen) => void; onManageProfile: () => void; onSetRegisterOrigin: (o: RegisterOrigin) => void }) {
-  const { data: dashData } = useQuery({ queryKey: ['dashboard'], queryFn: () => api.getDashboard() })
+  type DashFilter = 'all' | 'today' | 'last30days' | 'specific' | 'range'
+  const [dashFilter, setDashFilter] = useState<DashFilter>('all')
+  const [specificDate, setSpecificDate] = useState('')
+  const [rangeFrom, setRangeFrom] = useState('')
+  const [rangeTo, setRangeTo] = useState('')
+  const [rangeError, setRangeError] = useState(false)
+
+  const dashParams = (() => {
+    if (dashFilter === 'specific' && specificDate) return { dateFilter: 'specific' as const, date: specificDate }
+    if (dashFilter === 'range') {
+      if (rangeFrom && rangeTo) return { dateFilter: 'range' as const, startDate: rangeFrom, endDate: rangeTo }
+      return null
+    }
+    if (dashFilter === 'today' || dashFilter === 'last30days') return { dateFilter: dashFilter }
+    return { dateFilter: 'all' as const }
+  })()
+
+  const { data: dashData, isLoading: dashLoading } = useQuery({
+    queryKey: ['dashboard', dashFilter, specificDate, rangeFrom, rangeTo],
+    queryFn: () => api.getDashboard(dashParams ?? { dateFilter: 'all' }),
+    enabled: dashParams !== null,
+  })
   const stats = dashData?.data ?? null
   const fmt = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-  const metrics = [['Total registered', stats ? String(stats.bicycles) : '…', TrendingUp], ['Active agents', stats ? String(stats.activeAgents) : '…', Users], ['Transactions', stats ? String(stats.transactions) : '…', Cloud], ['Flagged alerts', stats ? String(stats.flags) : '…', Flag], ['Total bicycle price', stats ? fmt(stats.totalBicyclePrice) : '…', TrendingUp], ['Total service fee', stats ? fmt(stats.totalServiceFee) : '…', Cloud]] as const
+  const metrics = [['Total registered', dashLoading ? '…' : stats ? String(stats.bicycles) : '0', TrendingUp], ['Active agents', stats ? String(stats.activeAgents) : '…', Users], ['Transactions', dashLoading ? '…' : stats ? String(stats.transactions) : '0', Cloud], ['Flagged alerts', dashLoading ? '…' : stats ? String(stats.flags) : '0', Flag], ['Total bicycle price', dashLoading ? '…' : stats ? fmt(stats.totalBicyclePrice) : '0.00', TrendingUp], ['Total service fee', dashLoading ? '…' : stats ? fmt(stats.totalServiceFee) : '0.00', Cloud]] as const
   const modules = [['Transactions', 'Historical log', Activity], ['Bicycles', 'Registry inventory', Bike], ['People', 'Owner directory', Users], ['Field agents', 'Team management', UserRound], ['Reports', 'Export & analytics', FileText], ['Flagged', 'Priority queue', Flag]] as const
+
+  const filterLabel = dashFilter === 'today' ? 'Today'
+    : dashFilter === 'last30days' ? 'Last 30 Days'
+    : dashFilter === 'specific' && specificDate ? specificDate
+    : dashFilter === 'range' && rangeFrom && rangeTo ? `${rangeFrom} – ${rangeTo}`
+    : 'All Time'
+
   return <section className="admin-home">
     <div className="admin-brand"><span>BIKETRACK ADMIN</span><small>RECORD-KEEPING CONTROL CENTER</small></div>
+    <div style={{ marginBottom: 12 }}>
+      <div className="admin-filters" style={{ marginBottom: dashFilter === 'specific' || dashFilter === 'range' ? 8 : 0 }}>
+        {(['all', 'today', 'last30days', 'specific', 'range'] as DashFilter[]).map((f) =>
+          <button key={f} className={dashFilter === f ? 'selected' : ''} onClick={() => { setDashFilter(f); setRangeError(false) }}>
+            {f === 'all' ? 'All Time' : f === 'today' ? 'Today' : f === 'last30days' ? 'Last 30 Days' : f === 'specific' ? 'Date' : 'Range'}
+          </button>
+        )}
+      </div>
+      {dashFilter === 'specific' && <div className="date-inputs"><label style={{ fontSize: 12, color: '#7f8d87', display: 'flex', flexDirection: 'column', gap: 2 }}><span><CalendarDays size={12} /> Date</span><input type="date" value={specificDate} onChange={(e) => setSpecificDate(e.target.value)} /></label></div>}
+      {dashFilter === 'range' && <div className="date-inputs">
+        <label style={{ fontSize: 12, color: '#7f8d87', display: 'flex', flexDirection: 'column', gap: 2 }}><span><CalendarDays size={12} /> From</span><input type="date" value={rangeFrom} onChange={(e) => { setRangeFrom(e.target.value); setRangeError(false) }} /></label>
+        <label style={{ fontSize: 12, color: '#7f8d87', display: 'flex', flexDirection: 'column', gap: 2 }}><span><CalendarDays size={12} /> To</span><input type="date" value={rangeTo} onChange={(e) => { const v = e.target.value; setRangeTo(v); setRangeError(rangeFrom > v) }} /></label>
+      </div>}
+      {rangeError && <p style={{ fontSize: 12, color: '#e05', margin: '4px 0 0' }}>Start date must be before end date.</p>}
+      {dashParams !== null && <p style={{ fontSize: 11, color: '#7f8d87', margin: '4px 0 0' }}>Showing: {filterLabel}</p>}
+    </div>
     <div className="admin-metrics">{metrics.map(([label, value, Icon]) => <div className="admin-metric" key={label}><div><Icon size={14} /></div><small>{label}</small><strong>{value}</strong></div>)}</div>
     <div className="admin-section-heading"><span><Flag size={13} /> Flagged queue</span><button onClick={() => onNavigate('flagged-queue')}>View all</button></div><p className="admin-subtitle">Immediate resolution required</p>
     <p className="admin-section-label"><TrendingUp size={11} /> Control modules</p><div className="module-grid">{modules.map(([label, copy, Icon], index) => <button key={label} className={index === 5 ? 'module danger' : 'module'} onClick={() => onNavigate(['admin-transactions', 'bicycle-inventory', 'registry-profile', 'agent-management', 'reports-exports', 'flagged-queue'][index] as Screen)}><Icon size={15} /><strong>{label}</strong><small>{copy}</small>{index === 5 && <b>!</b>}</button>)}</div>
