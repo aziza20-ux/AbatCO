@@ -20,38 +20,46 @@ export async function dashboard(request: AuthRequest, response: Response) {
     endDate: z.string().optional(),
   }).parse(request.query)
 
-  // Build date range from query params. All boundaries are UTC-midnight of the
-  // submitted date strings, matching PostgreSQL's timestamptz storage used by Prisma.
+  // All boundaries are UTC midnight so that calendar-date selections from the
+  // frontend (YYYY-MM-DD, no timezone) map consistently to PostgreSQL's
+  // timestamptz storage regardless of the server's local TZ setting.
   let dateFrom: Date | undefined
   let dateTo: Date | undefined
   const filter = query.dateFilter ?? 'all'
 
+  const utcDay = (y: number, m: number, d: number) => new Date(Date.UTC(y, m, d))
+
   if (filter === 'today') {
     const now = new Date()
-    dateFrom = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-    dateTo = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+    dateFrom = utcDay(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+    dateTo   = utcDay(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)
   } else if (filter === 'last30days') {
     const now = new Date()
-    dateTo = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
-    dateFrom = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29)
+    dateTo   = utcDay(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)
+    dateFrom = utcDay(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 29)
   } else if (filter === 'specific' && query.date) {
+    // new Date('YYYY-MM-DD') is UTC midnight per ISO 8601; extract UTC parts.
     const d = new Date(query.date)
-    dateFrom = new Date(d.getFullYear(), d.getMonth(), d.getDate())
-    dateTo = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)
+    dateFrom = utcDay(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
+    dateTo   = utcDay(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1)
   } else if (filter === 'range' && query.startDate && query.endDate) {
     const s = new Date(query.startDate)
     const e = new Date(query.endDate)
-    dateFrom = new Date(s.getFullYear(), s.getMonth(), s.getDate())
-    dateTo = new Date(e.getFullYear(), e.getMonth(), e.getDate() + 1)
+    dateFrom = utcDay(s.getUTCFullYear(), s.getUTCMonth(), s.getUTCDate())
+    dateTo   = utcDay(e.getUTCFullYear(), e.getUTCMonth(), e.getUTCDate() + 1)
   }
 
-  const txWhere = dateFrom && dateTo ? { transactionDate: { gte: dateFrom, lt: dateTo } } : {}
-  const regWhere = dateFrom && dateTo ? { createdAt: { gte: dateFrom, lt: dateTo } } : {}
+  const txWhere  = dateFrom && dateTo ? { transactionDate: { gte: dateFrom, lt: dateTo } } : {}
+  const regWhere = dateFrom && dateTo ? { createdAt:       { gte: dateFrom, lt: dateTo } } : {}
 
   const [bicycles, agents, transactions, flags, priceTotals] = await Promise.all([
+    // Count distinct bicycles that have a registration in the selected period.
+    // Using bicycle.count with a nested filter (not registration.count) ensures
+    // a bicycle with multiple registrations in the window is counted only once.
+    // For 'all', every bicycle counts regardless of date.
     filter === 'all'
       ? prisma.bicycle.count()
-      : prisma.registration.count({ where: regWhere }),
+      : prisma.bicycle.count({ where: { registrations: { some: regWhere } } }),
     prisma.user.count({ where: { role: 'AGENT', isActive: true } }),
     prisma.transaction.count({ where: txWhere }),
     prisma.transaction.count({ where: { ...txWhere, flagStatus: { in: ['FLAGGED', 'CONFLICTED'] } } }),
