@@ -1,6 +1,6 @@
-﻿import { useState, useEffect, type ReactNode } from 'react'
+﻿import { useState, useEffect, useRef, type ReactNode } from 'react'
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from '@tanstack/react-query'
-import { Activity, ArrowLeft, ArrowRight, Bike, CalendarDays, Check, ChevronRight, Cloud, Database, Eye, FileText, Flag, Home, LockKeyhole, MapPin, Plus, QrCode, Search, Send, Settings, ShieldAlert, ShieldCheck, Signal, Smartphone, Trash2, TrendingUp, Type, UserRound, Users, Wifi, WifiOff, X } from 'lucide-react'
+import { Activity, ArrowLeft, ArrowRight, Bike, CalendarDays, Camera, Check, ChevronRight, Cloud, Database, Eye, FileText, Flag, Home, LockKeyhole, MapPin, Plus, QrCode, Search, Send, Settings, ShieldAlert, ShieldCheck, Signal, Smartphone, Trash2, TrendingUp, Type, UserRound, Users, Wifi, WifiOff, X } from 'lucide-react'
 import { type BicycleRecord, type PersonRecord, mockUser } from './mock/data'
 import { db } from './lib/db'
 import * as api from './lib/api'
@@ -508,9 +508,9 @@ function ReportsExportsScreen({ onNavigate }: { onNavigate: (screen: Screen) => 
 function AdminPanel({ title, kicker, children }: { title: string; kicker: string; children: ReactNode }) { return <section className="admin-panel"><p className="screen-kicker">{kicker}</p><h1>{title}</h1>{children}</section> }
 function AdminInfo({ title, rows }: { title: string; rows: string[] }) { return <div className="admin-info"><h2>{title}</h2>{rows.map((row) => <p key={row}>{row}</p>)}</div> }
 
-type TransactionDraft = { type: 'SALE' | 'TRANSFER'; frameNumber: string; bicycleBrand: string; bicycleModel: string; bicycleColor: string; distinguishingFeatures: string; sellerName: string; sellerNationalId: string; sellerPhone: string; sellerCell: string; sellerSector: string; sellerVillage: string; buyerName: string; buyerNationalId: string; buyerPhone: string; buyerCell: string; buyerSector: string; buyerVillage: string; bicyclePrice: string; serviceFee: string; reason: string }
+type TransactionDraft = { type: 'SALE' | 'TRANSFER'; frameNumber: string; bicycleBrand: string; bicycleModel: string; bicycleColor: string; distinguishingFeatures: string; sellerName: string; sellerNationalId: string; sellerPhone: string; sellerCell: string; sellerSector: string; sellerVillage: string; sellerNationalIdPhotoUrl: string; buyerName: string; buyerNationalId: string; buyerPhone: string; buyerCell: string; buyerSector: string; buyerVillage: string; buyerNationalIdPhotoUrl: string; bicyclePrice: string; serviceFee: string; reason: string }
 
-const makeEmptyTransaction = (): TransactionDraft => ({ type: (localStorage.getItem('defaultTxType') as 'SALE' | 'TRANSFER') ?? 'SALE', frameNumber: '', bicycleBrand: '', bicycleModel: '', bicycleColor: '', distinguishingFeatures: '', sellerName: '', sellerNationalId: '', sellerPhone: '', sellerCell: '', sellerSector: '', sellerVillage: '', buyerName: '', buyerNationalId: '', buyerPhone: '', buyerCell: '', buyerSector: '', buyerVillage: '', bicyclePrice: '', serviceFee: '5.00', reason: '' })
+const makeEmptyTransaction = (): TransactionDraft => ({ type: (localStorage.getItem('defaultTxType') as 'SALE' | 'TRANSFER') ?? 'SALE', frameNumber: '', bicycleBrand: '', bicycleModel: '', bicycleColor: '', distinguishingFeatures: '', sellerName: '', sellerNationalId: '', sellerPhone: '', sellerCell: '', sellerSector: '', sellerVillage: '', sellerNationalIdPhotoUrl: '', buyerName: '', buyerNationalId: '', buyerPhone: '', buyerCell: '', buyerSector: '', buyerVillage: '', buyerNationalIdPhotoUrl: '', bicyclePrice: '', serviceFee: '5.00', reason: '' })
 
 function TransactionFlow({ step, setStep, saved, onSave, onCancel, onViewOwner }: { step: number; setStep: (step: number) => void; saved: boolean; onSave: () => void; onCancel: () => void; onViewOwner: (person: PersonRecord) => void }) {
   const [draft, setDraft] = useState<TransactionDraft>(() => makeEmptyTransaction())
@@ -550,8 +550,8 @@ function TransactionFlow({ step, setStep, saved, onSave, onCancel, onViewOwner }
     const clientOperationId = crypto.randomUUID()
     try {
       const [seller, buyer, bicycle] = await Promise.all([
-        draft.sellerNationalId.trim() ? api.upsertPersonByNationalId({ name: draft.sellerName, nationalId: draft.sellerNationalId, phone: draft.sellerPhone, cell: draft.sellerCell, sector: draft.sellerSector, village: draft.sellerVillage }) : Promise.resolve(null),
-        api.upsertPersonByNationalId({ name: draft.buyerName, nationalId: draft.buyerNationalId, phone: draft.buyerPhone, cell: draft.buyerCell, sector: draft.buyerSector, village: draft.buyerVillage }),
+        draft.sellerNationalId.trim() ? api.upsertPersonByNationalId({ name: draft.sellerName, nationalId: draft.sellerNationalId, phone: draft.sellerPhone, cell: draft.sellerCell, sector: draft.sellerSector, village: draft.sellerVillage, nationalIdPhotoUrl: draft.sellerNationalIdPhotoUrl || undefined }) : Promise.resolve(null),
+        api.upsertPersonByNationalId({ name: draft.buyerName, nationalId: draft.buyerNationalId, phone: draft.buyerPhone, cell: draft.buyerCell, sector: draft.buyerSector, village: draft.buyerVillage, nationalIdPhotoUrl: draft.buyerNationalIdPhotoUrl || undefined }),
         api.upsertBicycleByFrameNumber({ frameNumber: draft.frameNumber, brand: draft.bicycleBrand, model: draft.bicycleModel, color: draft.bicycleColor, distinguishingFeatures: draft.distinguishingFeatures }),
       ])
       const payload = {
@@ -631,7 +631,7 @@ function PartyFields({ label, prefix, draft, update }: { label: string; prefix: 
     }
   }
   const status = lookupState === 'found' ? <div className="person-link-status found"><Check size={13} /> Existing person linked from database</div> : lookupState === 'missing' ? <div className="person-link-status missing"><UserRound size={13} /> Person not found. Complete the fields to create a new person.</div> : null
-  return <fieldset className="party-fieldset"><legend>{label}</legend><div className="person-id-lookup"><label>National ID (16 characters)<input value={draft[`${prefix}NationalId`]} maxLength={16} onChange={(event) => { update(`${prefix}NationalId`, event.target.value); setLookupState('idle') }} placeholder="Enter 16-character national ID" /></label><button className="secondary-button" disabled={lookupState === 'checking' || draft[`${prefix}NationalId`].length !== 16} onClick={() => void lookup()}>{lookupState === 'checking' ? 'Checking...' : 'Look up person'}</button></div>{status}<label>Name<input value={draft[`${prefix}Name`]} readOnly={lookupState === 'found'} onChange={(event) => update(`${prefix}Name`, event.target.value)} placeholder="Full legal name" /></label><div className="two-fields"><label>Phone<input value={draft[`${prefix}Phone`]} readOnly={lookupState === 'found'} onChange={(event) => update(`${prefix}Phone`, event.target.value)} placeholder="Primary phone" /></label><label>Cell<input value={draft[`${prefix}Cell`]} readOnly={lookupState === 'found'} onChange={(event) => update(`${prefix}Cell`, event.target.value)} placeholder="Cell number" /></label></div><div className="two-fields"><label>Sector<input value={draft[`${prefix}Sector`]} readOnly={lookupState === 'found'} onChange={(event) => update(`${prefix}Sector`, event.target.value)} placeholder="Sector" /></label><label>Village<input value={draft[`${prefix}Village`]} readOnly={lookupState === 'found'} onChange={(event) => update(`${prefix}Village`, event.target.value)} placeholder="Village" /></label></div></fieldset>
+  return <fieldset className="party-fieldset"><legend>{label}</legend><div className="person-id-lookup"><label>National ID (16 characters)<input value={draft[`${prefix}NationalId`]} maxLength={16} onChange={(event) => { update(`${prefix}NationalId`, event.target.value); setLookupState('idle') }} placeholder="Enter 16-character national ID" /></label><button className="secondary-button" disabled={lookupState === 'checking' || draft[`${prefix}NationalId`].length !== 16} onClick={() => void lookup()}>{lookupState === 'checking' ? 'Checking...' : 'Look up person'}</button></div>{status}<label>Name<input value={draft[`${prefix}Name`]} readOnly={lookupState === 'found'} onChange={(event) => update(`${prefix}Name`, event.target.value)} placeholder="Full legal name" /></label><div className="two-fields"><label>Phone<input value={draft[`${prefix}Phone`]} readOnly={lookupState === 'found'} onChange={(event) => update(`${prefix}Phone`, event.target.value)} placeholder="Primary phone" /></label><label>Cell<input value={draft[`${prefix}Cell`]} readOnly={lookupState === 'found'} onChange={(event) => update(`${prefix}Cell`, event.target.value)} placeholder="Cell number" /></label></div><div className="two-fields"><label>Sector<input value={draft[`${prefix}Sector`]} readOnly={lookupState === 'found'} onChange={(event) => update(`${prefix}Sector`, event.target.value)} placeholder="Sector" /></label><label>Village<input value={draft[`${prefix}Village`]} readOnly={lookupState === 'found'} onChange={(event) => update(`${prefix}Village`, event.target.value)} placeholder="Village" /></label></div><NationalIdCamera photoUrl={draft[`${prefix}NationalIdPhotoUrl`]} onCapture={(url) => update(`${prefix}NationalIdPhotoUrl`, url)} /></fieldset>
 }
 function ReviewStep({ draft, total, onPrint }: { draft: TransactionDraft; total: number; onPrint: () => void }) { return <div className="flow-body"><h2>Review transaction</h2><p>Check the record before saving. The PDF is formatted for printing and contains the transaction summary.</p><div className="review-summary"><span>Transaction type<strong>{draft.type === 'SALE' ? 'Ownership transfer / sale' : 'Ownership transfer'}</strong></span><span>Bicycle<strong>{draft.bicycleBrand || 'New'} {draft.bicycleModel || 'record'} · {draft.frameNumber || 'No serial'}</strong></span><span>Seller and buyer<strong>{draft.sellerName || 'Seller pending'} → {draft.buyerName || 'Buyer pending'}</strong></span><span>Amounts<strong>Bicycle {draft.bicyclePrice || '0.00'} + service {draft.serviceFee || '0.00'} = {total.toFixed(2)}</strong></span></div><button className="secondary-button print-button" onClick={onPrint}><FileText size={15} /> Preview / print transaction PDF</button><div className="audit-note"><ShieldCheck size={15} /> This action will be added to the audit log.</div></div> }
 
@@ -649,7 +649,7 @@ function RegisterScreen({ saved, onSave, onCancel, onViewOwner }: { saved: boole
   const [personQueryError, setPersonQueryError] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [serialLocked, setSerialLocked] = useState(false)
-  const [newPerson, setNewPerson] = useState({ name: '', nationalId: '', phone: '', cell: '', sector: '', village: '' })
+  const [newPerson, setNewPerson] = useState({ name: '', nationalId: '', phone: '', cell: '', sector: '', village: '', nationalIdPhotoUrl: '' })
   const updateBicycle = (key: keyof Omit<RegistrationDraft, 'person'>, value: string) => setDraft((current) => ({ ...current, [key]: value }))
   const updatePerson = (key: keyof typeof newPerson, value: string) => setNewPerson((current) => ({ ...current, [key]: value }))
   const verifySerial = async (): Promise<{ owner: PersonRecord | null }> => {
@@ -689,7 +689,7 @@ function RegisterScreen({ saved, onSave, onCancel, onViewOwner }: { saved: boole
     const clientOperationId = crypto.randomUUID()
     try {
       const [person, bicycle] = await Promise.all([
-        api.upsertPersonByNationalId({ name: draft.person.name, nationalId: draft.person.nationalId, phone: draft.person.phone, cell: draft.person.cell, sector: draft.person.sector, village: draft.person.village }),
+        api.upsertPersonByNationalId({ name: draft.person.name, nationalId: draft.person.nationalId, phone: draft.person.phone, cell: draft.person.cell, sector: draft.person.sector, village: draft.person.village, nationalIdPhotoUrl: (draft.person as api.Person).nationalIdPhotoUrl }),
         api.upsertBicycleByFrameNumber({ frameNumber: draft.frameNumber, brand: draft.brand, model: draft.model, color: draft.color, distinguishingFeatures: draft.features }),
       ])
       await db.pendingRegistrations.put({ id: clientOperationId, payload: { bicycleId: bicycle.id, ownerId: person.id }, createdAt: Date.now() })
@@ -711,7 +711,7 @@ function RegisterScreen({ saved, onSave, onCancel, onViewOwner }: { saved: boole
     {phase === 'serial' && <div className="flow-body" style={{ paddingBottom: 0 }}><h2>Verify bicycle serial</h2><p>Check the database before creating a registration. A bicycle serial can only be registered once.</p><label>Frame serial number<div className="serial-input"><QrCode size={16} /><input value={draft.frameNumber} onChange={(event) => { updateBicycle('frameNumber', event.target.value); setSerialChecked(false); setSerialOwner(null); setSerialConfirmed(false) }} placeholder="E.G. ABT-2024-00918" /><Smartphone size={16} /></div></label><button className="secondary-button" onClick={() => void verifySerial()}><Search size={15} /> Check bicycle database</button>{serialChecked && serialOwner && <div className="duplicate-warning"><ShieldAlert size={17} /><span><strong>Serial already registered</strong><small>This bicycle is linked to {serialOwner.name}. Resolve this issue before continuing.</small><button className="owner-details-link" onClick={() => onViewOwner(serialOwner)}>View owner details <ArrowRight size={12} /></button><div className="owner-details"><b>{serialOwner.name}</b><small>{serialOwner.nationalId} · {serialOwner.phone}</small><small>{serialOwner.sector} · {serialOwner.village}</small></div></span><div className="duplicate-actions">{serialConfirmed ? <Check className="confirmation-check" size={17} /> : <button className="confirm-warning" onClick={() => setSerialConfirmed(true)}>Issue resolved</button>}<button className="use-bicycle-btn" onClick={() => setPhase('person-search')}>Use this bicycle <ArrowRight size={12} /></button></div></div>}{serialChecked && !serialOwner && <div className="verification-result not-found"><Check size={15} /><span><strong>Serial available</strong><small>No bicycle record was found. Continue to capture the bicycle.</small></span></div>}</div>}
     {phase === 'bicycle' && <div className="flow-body"><h2>Record bicycle details</h2><p>Capture the bicycle before linking its current owner.</p>{serialLocked ? <div className="capture-summary"><span>Frame serial<strong>{draft.frameNumber}</strong></span><span className="not-found-label">Available to register</span></div> : <label>Frame serial number<div className="serial-input"><QrCode size={16} /><input value={draft.frameNumber} onChange={(event) => updateBicycle('frameNumber', event.target.value)} onBlur={() => { if (draft.frameNumber.trim()) setSerialLocked(true) }} placeholder="E.G. ABT-2024-00918" /></div></label>}<div className="two-fields"><label>Brand<input value={draft.brand} onChange={(event) => updateBicycle('brand', event.target.value)} placeholder="e.g. Trek" /></label><label>Model<input value={draft.model} onChange={(event) => updateBicycle('model', event.target.value)} placeholder="e.g. Marlin 7" /></label></div><div className="two-fields"><label>Color<input value={draft.color} onChange={(event) => updateBicycle('color', event.target.value)} placeholder="e.g. black" /></label><label>Photo reference<input placeholder="Optional photo ID" /></label></div><label>Distinguishing features<textarea value={draft.features} onChange={(event) => updateBicycle('features', event.target.value)} placeholder="Scratches, markings, accessories" /></label></div>}
     {phase === 'person-search' && <div className="flow-body"><h2>Find current owner</h2><p>Search by name or national ID. National ID is the primary person identifier.</p><label>Name or national ID<div className="search-field"><Search size={15} /><input value={personQuery} onChange={(event) => { setPersonQuery(event.target.value); setPersonQueryError(false); if (!event.target.value) { setPersonChecked(false); setDraft((current) => ({ ...current, person: null })) } }} placeholder="Search person in database" /></div></label><button className="secondary-button" onClick={findPerson}><Search size={15} /> Find person</button>{personQueryError && <p className="error-text" style={{ color: '#e05', fontSize: 12, margin: '4px 0' }}>Enter a name or national ID to search.</p>}{personChecked && person && <div className="person-found"><Check size={16} /><span><strong>{person.name}</strong><small>{person.nationalId} · {person.phone}</small><small>{person.sector} · {person.village}</small></span></div>}{personChecked && !person && <div className="person-not-found"><UserRound size={16} /><span><strong>Person not found</strong><small>No person matches this search. Add the owner to the database.</small></span><button onClick={() => setPhase('person-new')}>Add new person <ArrowRight size={14} /></button></div>}</div>}
-    {phase === 'person-new' && <div className="flow-body"><h2>Add person to database</h2><p>Create the owner record first, then it will be linked to this bicycle registration.</p><label>Full name<input value={newPerson.name} onChange={(event) => updatePerson('name', event.target.value)} placeholder="Full legal name" /></label><label>National ID (16 characters)<input value={newPerson.nationalId} maxLength={16} onChange={(event) => updatePerson('nationalId', event.target.value)} placeholder="Enter 16-character national ID" /></label><div className="two-fields"><label>Phone<input value={newPerson.phone} onChange={(event) => updatePerson('phone', event.target.value)} placeholder="Primary phone" /></label><label>Cell<input value={newPerson.cell} onChange={(event) => updatePerson('cell', event.target.value)} placeholder="Cell number" /></label></div><div className="two-fields"><label>Sector<input value={newPerson.sector} onChange={(event) => updatePerson('sector', event.target.value)} placeholder="Sector" /></label><label>Village<input value={newPerson.village} onChange={(event) => updatePerson('village', event.target.value)} placeholder="Village" /></label></div></div>}
+    {phase === 'person-new' && <div className="flow-body"><h2>Add person to database</h2><p>Create the owner record first, then it will be linked to this bicycle registration.</p><label>Full name<input value={newPerson.name} onChange={(event) => updatePerson('name', event.target.value)} placeholder="Full legal name" /></label><label>National ID (16 characters)<input value={newPerson.nationalId} maxLength={16} onChange={(event) => updatePerson('nationalId', event.target.value)} placeholder="Enter 16-character national ID" /></label><div className="two-fields"><label>Phone<input value={newPerson.phone} onChange={(event) => updatePerson('phone', event.target.value)} placeholder="Primary phone" /></label><label>Cell<input value={newPerson.cell} onChange={(event) => updatePerson('cell', event.target.value)} placeholder="Cell number" /></label></div><div className="two-fields"><label>Sector<input value={newPerson.sector} onChange={(event) => updatePerson('sector', event.target.value)} placeholder="Sector" /></label><label>Village<input value={newPerson.village} onChange={(event) => updatePerson('village', event.target.value)} placeholder="Village" /></label></div><NationalIdCamera photoUrl={newPerson.nationalIdPhotoUrl} onCapture={(url) => updatePerson('nationalIdPhotoUrl', url)} /></div>}
     {phase === 'review' && <div className="flow-body"><h2>Review registration</h2><p>Confirm the bicycle and its linked current owner before saving.</p><div className="review-summary"><span>Bicycle<strong>{draft.brand || 'New'} {draft.model || 'bicycle'} · {draft.frameNumber}</strong></span><span>Owner<strong>{person?.name}</strong></span><span>National ID<strong>{person?.nationalId}</strong></span><span>Location<strong>{person?.sector} · {person?.village}</strong></span></div><div className="audit-note"><ShieldCheck size={15} /> Registration and owner link will be audited.</div></div>}
     <div className="flow-actions"><button className="quiet-button" onClick={phase === 'serial' ? onCancel : () => setPhase(phase === 'person-new' ? 'person-search' : phase === 'review' ? 'person-search' : phase === 'person-search' ? 'bicycle' : 'serial')}>Back</button><button className="action-button" disabled={(phase === 'bicycle' && (!draft.frameNumber.trim() || !draft.brand.trim())) || (phase === 'person-new' && (!newPerson.name || newPerson.nationalId.length !== 16)) || (isSaving && phase !== 'serial')} onClick={() => void (async () => {
       if (phase === 'serial') {
@@ -725,6 +725,90 @@ function RegisterScreen({ saved, onSave, onCancel, onViewOwner }: { saved: boole
     })()}>{isSaving ? 'Saving...' : phase === 'review' ? 'Save registration' : 'Continue'} <ArrowRight size={15} /></button></div>
   </section>
 }
+function NationalIdCamera({ photoUrl, onCapture }: { photoUrl: string; onCapture: (url: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const [viewing, setViewing] = useState(false)
+  const [preview, setPreview] = useState<string | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+
+  const startCamera = async () => {
+    setError(null); setPreview(null)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+      streamRef.current = stream
+      if (videoRef.current) { videoRef.current.srcObject = stream; void videoRef.current.play() }
+    } catch { setError('Camera access denied or unavailable.') }
+  }
+
+  const stopCamera = () => {
+    streamRef.current?.getTracks().forEach((t) => t.stop())
+    streamRef.current = null
+  }
+
+  const capture = () => {
+    if (!videoRef.current || !canvasRef.current) return
+    const v = videoRef.current; const c = canvasRef.current
+    c.width = v.videoWidth; c.height = v.videoHeight
+    c.getContext('2d')?.drawImage(v, 0, 0)
+    setPreview(c.toDataURL('image/jpeg', 0.85))
+    stopCamera()
+  }
+
+  const confirm = async () => {
+    if (!preview) return
+    setUploading(true); setError(null)
+    try {
+      const blob = await (await fetch(preview)).blob()
+      const file = new File([blob], 'national-id.jpg', { type: 'image/jpeg' })
+      const result = await api.uploadPhoto(file, 'national-ids')
+      onCapture(result.url)
+      setOpen(false); setPreview(null)
+    } catch { setError('Upload failed. Try again.') }
+    finally { setUploading(false) }
+  }
+
+  const openCamera = () => { setOpen(true); setTimeout(() => void startCamera(), 100) }
+  const retake = () => { setPreview(null); void startCamera() }
+  const cancel = () => { stopCamera(); setOpen(false); setPreview(null); setError(null) }
+
+  return <div style={{ marginTop: 12 }}>
+    <p style={{ fontSize: 12, color: '#7f8d87', marginBottom: 6 }}>National ID Photo <span style={{ color: '#4a5a54' }}>(optional)</span></p>
+    {photoUrl
+      ? <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <button onClick={() => setViewing(true)} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer' }} aria-label="View National ID photo"><img src={photoUrl} alt="National ID" style={{ width: 80, height: 52, objectFit: 'cover', borderRadius: 4, border: '1px solid #2a3a34' }} /></button>
+          <button className="secondary-button" style={{ fontSize: 12 }} onClick={openCamera}><Camera size={13} /> Retake</button>
+        </div>
+      : <button className="secondary-button" onClick={openCamera}><Camera size={14} /> Take National ID Photo</button>}
+{viewing && <div style={{ position: 'fixed', inset: 0, background: '#0a1410', zIndex: 200, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 16 }}><img src={photoUrl} alt="National ID full" style={{ width: '100%', maxWidth: 480, borderRadius: 8 }} /><p style={{ fontSize: 13, color: '#7f8d87' }}>Tap retake to replace this photo</p><div style={{ display: 'flex', gap: 10 }}><button className="secondary-button" onClick={() => { setViewing(false); openCamera() }}><Camera size={13} /> Retake</button><button className="quiet-button" onClick={() => setViewing(false)}>Close</button></div></div>}
+        {open && <div style={{ position: 'fixed', inset: 0, background: '#0a1410', zIndex: 200, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 16 }}>
+      {!preview
+        ? <>
+            <video ref={videoRef} style={{ width: '100%', maxWidth: 480, borderRadius: 8, background: '#000' }} playsInline muted />
+            <canvas ref={canvasRef} style={{ display: 'none' }} />
+            {error && <p style={{ color: '#e05', fontSize: 13 }}>{error}</p>}
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button className="action-button" onClick={capture}><Camera size={15} /> Capture</button>
+              <button className="quiet-button" onClick={cancel}>Cancel</button>
+            </div>
+          </>
+        : <>
+            <img src={preview} alt="Preview" style={{ width: '100%', maxWidth: 480, borderRadius: 8 }} />
+            <p style={{ fontSize: 13, color: '#7f8d87' }}>Preview — confirm or retake</p>
+            {error && <p style={{ color: '#e05', fontSize: 13 }}>{error}</p>}
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button className="action-button" disabled={uploading} onClick={() => void confirm()}>{uploading ? 'Uploading...' : <><Check size={14} /> Confirm</>}</button>
+              <button className="quiet-button" onClick={retake}>Retake</button>
+              <button className="quiet-button" onClick={cancel}>Cancel</button>
+            </div>
+          </>}
+    </div>}
+  </div>
+}
+
 function Success({ title, copy, onDone }: { title: string; copy: string; onDone: () => void }) {
   const online = navigator.onLine
   return <div className="success-screen"><span><Check size={28} /></span><h2>{title}</h2><p>{online ? 'Recorded successfully.' : copy}</p><button className="action-button" onClick={onDone}>Return to dashboard <Home size={15} /></button></div>
@@ -765,8 +849,12 @@ function SearchScreen({ query, setQuery, onSelect }: { query: string; setQuery: 
 
 function PersonExpandable({ person }: { person: api.PersonSummary & { nationalId?: string } }) {
   const [open, setOpen] = useState(false)
+  const [viewingId, setViewingId] = useState(false)
   return <div className="person-expandable">
-    <button className="person-expand-btn" onClick={() => setOpen((v) => !v)}>{open ? 'View less' : 'View more'} <ChevronRight size={13} style={{ transform: open ? 'rotate(90deg)' : undefined }} /></button>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <button className="person-expand-btn" onClick={() => setOpen((v) => !v)}>{open ? 'View less' : 'View more'} <ChevronRight size={13} style={{ transform: open ? 'rotate(90deg)' : undefined }} /></button>
+      {person.nationalIdPhotoUrl && <button className="person-expand-btn" style={{ color: '#4caf7d' }} onClick={() => setViewingId(true)}>View ID</button>}
+    </div>
     {open && <dl className="person-expand-details">
       {person.nationalId && <><dt>National ID</dt><dd>{person.nationalId}</dd></>}
       {person.phone && <><dt>Phone</dt><dd>{person.phone}</dd></>}
@@ -774,6 +862,11 @@ function PersonExpandable({ person }: { person: api.PersonSummary & { nationalId
       {person.sector && <><dt>Sector</dt><dd>{person.sector}</dd></>}
       {person.village && <><dt>Village</dt><dd>{person.village}</dd></>}
     </dl>}
+    {viewingId && <div style={{ position: 'fixed', inset: 0, background: '#0a1410', zIndex: 200, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 16 }}>
+      <p style={{ fontSize: 12, color: '#7f8d87', margin: 0 }}>{person.name} — National ID Photo</p>
+      <img src={person.nationalIdPhotoUrl} alt="National ID" style={{ width: '100%', maxWidth: 480, borderRadius: 8 }} />
+      <button className="quiet-button" onClick={() => setViewingId(false)}>Close</button>
+    </div>}
   </div>
 }
 

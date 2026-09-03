@@ -66,7 +66,8 @@ model Person {
   cell            String?
   address         String?
   sector          String?
-  village         String?
+  village              String?
+  nationalIdPhotoUrl   String?
   currentBicycles Bicycle[]      @relation("CurrentOwner")
   registrations   Registration[]
   soldTransactions Transaction[] @relation("Seller")
@@ -151,14 +152,15 @@ model AuditLog {
 }
 
 model RefreshToken {
-  id        String   @id @default(cuid())
-  tokenHash String   @unique
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  expiresAt DateTime
-  createdAt DateTime @default(now())
-  revokedAt DateTime?
-  replacedById String?
+  id               String   @id @default(cuid())
+  tokenHash        String   @unique
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt        DateTime
+  sessionExpiresAt DateTime
+  createdAt        DateTime @default(now())
+  revokedAt        DateTime?
+  replacedById     String?
   @@index([userId, expiresAt])
 }
 

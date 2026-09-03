@@ -24,7 +24,7 @@ export async function uploadPhoto(request: AuthRequest, response: Response) {
 
   const result = await new Promise<{ secure_url: string; public_id: string }>((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream(
-      { folder: 'abatco/bicycles', resource_type: 'image', allowed_formats: ['jpg', 'jpeg', 'png', 'webp'], transformation: [{ quality: 'auto', fetch_format: 'auto' }] },
+      { folder: request.query.folder === 'national-ids' ? 'abatco/national-ids' : 'abatco/bicycles', resource_type: 'image', allowed_formats: ['jpg', 'jpeg', 'png', 'webp'], transformation: [{ quality: 'auto', fetch_format: 'auto' }] },
       (error, result) => { if (error || !result) return reject(error ?? new Error('Upload failed')); resolve(result) },
     )
     stream.end(file.buffer)

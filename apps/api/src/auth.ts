@@ -22,17 +22,20 @@ export function accessToken(user: { id: string; role: 'ADMIN' | 'AGENT' }) {
 
 export async function issueRefreshToken(userId: string) {
   const raw = crypto.randomBytes(48).toString('base64url')
-  await prisma.refreshToken.create({ data: { tokenHash: refreshHash(raw), userId, expiresAt: new Date(Date.now() + refreshDays * 86400000) } })
+  const sessionExpiresAt = new Date(Date.now() + refreshDays * 86400000)
+  await prisma.refreshToken.create({ data: { tokenHash: refreshHash(raw), userId, expiresAt: sessionExpiresAt, sessionExpiresAt } })
   return raw
 }
 
 export async function rotateRefreshToken(raw: string) {
   const token = await prisma.refreshToken.findUnique({ where: { tokenHash: refreshHash(raw) }, include: { user: true } })
   if (!token || token.revokedAt || token.expiresAt <= new Date() || !token.user.isActive) throw new Error('Invalid refresh token')
+  if (token.sessionExpiresAt <= new Date()) throw new Error('Session expired')
   const replacement = crypto.randomBytes(48).toString('base64url')
+  const newExpiresAt = new Date(Math.min(Date.now() + refreshDays * 86400000, token.sessionExpiresAt.getTime()))
   await prisma.$transaction(async (tx: PrismaTx) => {
     await tx.refreshToken.update({ where: { id: token.id }, data: { revokedAt: new Date(), replacedById: refreshHash(replacement) } })
-    await tx.refreshToken.create({ data: { tokenHash: refreshHash(replacement), userId: token.userId, expiresAt: new Date(Date.now() + refreshDays * 86400000) } })
+    await tx.refreshToken.create({ data: { tokenHash: refreshHash(replacement), userId: token.userId, expiresAt: newExpiresAt, sessionExpiresAt: token.sessionExpiresAt } })
   })
   return { user: token.user, refreshToken: replacement }
 }

@@ -59,7 +59,7 @@ export async function logout() {
 
 // ── People ────────────────────────────────────────────────────────────────────
 
-export type Person = { id: string; name: string; nationalId: string; phone?: string; cell?: string; address?: string; sector?: string; village?: string }
+export type Person = { id: string; name: string; nationalId: string; phone?: string; cell?: string; address?: string; sector?: string; village?: string; nationalIdPhotoUrl?: string }
 
 export async function listPeople(q?: string, page = 1) {
   const params = new URLSearchParams({ page: String(page), limit: '5', ...(q ? { q } : {}) })
@@ -115,7 +115,7 @@ export async function updateBicycle(id: string, data: { brand?: string; model?: 
 
 // ── Transactions ──────────────────────────────────────────────────────────────
 
-export type PersonSummary = { id: string; name: string; nationalId?: string; phone?: string; cell?: string; sector?: string; village?: string }
+export type PersonSummary = { id: string; name: string; nationalId?: string; phone?: string; cell?: string; sector?: string; village?: string; nationalIdPhotoUrl?: string }
 export type Transaction = { id: string; transactionId: string; type: 'SALE' | 'TRANSFER'; price?: number; serviceFee?: number; reason?: string; location?: string; transactionDate: string; flagStatus: string; flagReason?: string; agentNote?: string; adminReviewNotes?: string; bicycle: { id: string; frameNumber: string; brand?: string; model?: string }; seller?: PersonSummary; buyer?: PersonSummary; recordingAgent: { id: string; name: string } }
 
 export async function listTransactions(params?: { q?: string; flagStatus?: string; type?: string; agentId?: string; personId?: string; page?: number }) {
@@ -243,11 +243,12 @@ export async function downloadTransactionsXlsx(params?: { from?: string; to?: st
 
 // ── Upload ────────────────────────────────────────────────────────────────────
 
-export async function uploadPhoto(file: File): Promise<{ url: string; publicId: string }> {
+export async function uploadPhoto(file: File, folder?: 'national-ids'): Promise<{ url: string; publicId: string }> {
   const token = localStorage.getItem('abatco_token')
   const form = new FormData()
   form.append('photo', file)
-  const response = await fetch(`${API_URL}/uploads/photo`, {
+  const qs = folder ? `?folder=${folder}` : ''
+  const response = await fetch(`${API_URL}/uploads/photo${qs}`, {
     method: 'POST',
     credentials: 'include',
     headers: token ? { Authorization: `Bearer ${token}` } : {},
