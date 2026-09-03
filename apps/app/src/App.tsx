@@ -18,9 +18,10 @@ const navItems: { screen: Screen; label: string; icon: typeof Home }[] = [
 ]
 
 export default function App() {
-  const [screen, setScreen] = useState<Screen>('login')
+  const [screen, setScreen] = useState<Screen>(() => localStorage.getItem('abatco_token') ? 'home' : 'login')
   const [role, setRole] = useState<Role>('AGENT')
   const [currentUser, setCurrentUser] = useState<{ id: string; name: string; role: Role } | null>(null)
+  const [restoring, setRestoring] = useState(() => Boolean(localStorage.getItem('abatco_token')))
   const [selected, setSelected] = useState<BicycleRecord | null>(null)
   const [selectedTransactionId, setSelectedTransactionId] = useState<string | null>(null)
   const [detailsOrigin, setDetailsOrigin] = useState<Screen>('search')
@@ -60,6 +61,54 @@ export default function App() {
     if (screen !== 'login') return startSyncWorker()
   }, [screen])
 
+  useEffect(() => {
+    if (!restoring) return
+    api.refreshAccessToken()
+      .then(() => {
+        // token refreshed — we need the user info; decode role from the JWT
+        const token = localStorage.getItem('abatco_token')
+        if (token) {
+          try {
+            const payload = JSON.parse(atob(token.split('.')[1]))
+            const userRole: Role = payload.role === 'ADMIN' ? 'ADMIN' : 'AGENT'
+            setRole(userRole)
+            setScreen(userRole === 'ADMIN' ? 'admin-home' : 'home')
+          } catch { setScreen('login') }
+        } else { setScreen('login') }
+      })
+      .catch((err: unknown) => {
+        const isNetwork = (err as { isNetworkError?: boolean })?.isNetworkError
+        if (isNetwork) {
+          // Temporary connectivity issue — stay on home with whatever token we have
+          const token = localStorage.getItem('abatco_token')
+          if (token) {
+            try {
+              const payload = JSON.parse(atob(token.split('.')[1]))
+              const userRole: Role = payload.role === 'ADMIN' ? 'ADMIN' : 'AGENT'
+              setRole(userRole)
+              setScreen(userRole === 'ADMIN' ? 'admin-home' : 'home')
+            } catch { setScreen('login') }
+          } else { setScreen('login') }
+        } else {
+          // Genuine 401 — session invalid
+          setScreen('login')
+        }
+      })
+      .finally(() => setRestoring(false))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    history.replaceState({ screen }, '')
+    const onPop = (e: PopStateEvent) => {
+      const s = (e.state as { screen?: Screen } | null)?.screen
+      if (s) setScreen(s)
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const [profileSection, setProfileSection] = useState<'main' | 'password' | 'sync' | 'cache'>('main')
   const openDetails = (record: BicycleRecord, origin: Screen = 'search') => { setSelected(record); setDetailsOrigin(origin); setScreen('details') }
   const openDetailsById = async (id: string, frameNumber: string) => {
@@ -68,7 +117,9 @@ export default function App() {
     if (bike) openDetails({ id: bike.id, frameNumber: bike.frameNumber, name: `${bike.brand ?? ''} ${bike.model ?? ''}`.trim() || bike.frameNumber, type: 'Bicycle', color: bike.color ?? '—', owner: bike.currentOwner?.name ?? '—', location: '—', status: bike.status === 'ACTIVE' ? 'Verified' : 'Needs review', date: '' }, 'activity')
   }
   const profileOrigin = (): Screen => role === 'ADMIN' ? 'admin-home' : 'home'
-  const go = (next: Screen) => { setSaved(false); if (next === 'transaction') setTransactionStep(0); if (next !== 'profile') setProfileSection('main'); setScreen(next) }
+  const go = (next: Screen) => { setSaved(false); if (next === 'transaction') setTransactionStep(0); if (next !== 'profile') setProfileSection('main'); history.pushState({ screen: next }, ''); setScreen(next) }
+
+  if (restoring) return <main className="login-screen"><div className="login-hero"><div className="hero-bike"><img src="/icons/icon-192.png" alt="AbatCO" /></div><strong>CycleTrack</strong></div><section className="login-panel"><p className="screen-kicker">RESUMING SESSION</p><p className="login-copy">Resuming session...</p></section></main>
 
   if (screen === 'login') return <Login onLogin={(user) => { setCurrentUser(user); setRole(user.role); go(user.role === 'ADMIN' ? 'admin-home' : 'home') }} onForgot={() => go('forgot-password')} />
   if (screen === 'forgot-password') return <ForgotPasswordScreen onBack={() => go('login')} onNext={(email) => { setForgotEmail(email); go('reset-password') }} />
@@ -94,7 +145,7 @@ export default function App() {
       {screen === 'bicycle-inventory' && <BicycleInventoryScreen onNavigate={go} onSelectBicycle={(bike) => { setSelectedOwnershipBicycle(bike); go('ownership-chain') }} />}
       {screen === 'ownership-chain' && <OwnershipChainScreen bicycle={selectedOwnershipBicycle} />}
       {screen === 'agent-management' && <AgentManagementScreen onNavigate={go} onSelectAgent={(a) => { setSelectedAgent(a); go('agent-terminal') }} />}
-      {screen === 'agent-onboarding' && <AgentOnboardingScreen onNavigate={(s) => { if (s !== 'agent-onboarding') setSelectedAgent(null); go(s) }} />}
+      {screen === 'agent-onboarding' && <AgentOnboardingScreen onNavigate={(s) => { if (s !== 'agent-onboarding') setSelectedAgent(null); go(s) }} editAgent={selectedAgent} />}
       {screen === 'agent-terminal' && <AgentTerminalScreen agent={selectedAgent} onNavigate={go} />}
       {screen === 'reports-exports' && <ReportsExportsScreen onNavigate={go} />}
       {screen === 'transaction' && <TransactionFlow step={transactionStep} setStep={setTransactionStep} saved={saved} onSave={() => { setSaved(true); refreshPending() }} onCancel={() => go('home')} onViewOwner={setOwnerDetails} />}
@@ -233,7 +284,8 @@ function HomeScreen({ onNavigate, onSelect, pendingCount, isOnline, setRegisterO
 function AdminHomeScreen({ onNavigate, onManageProfile, onSetRegisterOrigin }: { onNavigate: (screen: Screen) => void; onManageProfile: () => void; onSetRegisterOrigin: (o: RegisterOrigin) => void }) {
   const { data: dashData } = useQuery({ queryKey: ['dashboard'], queryFn: () => api.getDashboard() })
   const stats = dashData?.data ?? null
-  const metrics = [['Total registered', stats ? String(stats.bicycles) : '…', TrendingUp], ['Active agents', stats ? String(stats.activeAgents) : '…', Users], ['Transactions', stats ? String(stats.transactions) : '…', Cloud], ['Flagged alerts', stats ? String(stats.flags) : '…', Flag]] as const
+  const fmt = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const metrics = [['Total registered', stats ? String(stats.bicycles) : '…', TrendingUp], ['Active agents', stats ? String(stats.activeAgents) : '…', Users], ['Transactions', stats ? String(stats.transactions) : '…', Cloud], ['Flagged alerts', stats ? String(stats.flags) : '…', Flag], ['Total bicycle price', stats ? fmt(stats.totalBicyclePrice) : '…', TrendingUp], ['Total service fee', stats ? fmt(stats.totalServiceFee) : '…', Cloud]] as const
   const modules = [['Transactions', 'Historical log', Activity], ['Bicycles', 'Registry inventory', Bike], ['People', 'Owner directory', Users], ['Field agents', 'Team management', UserRound], ['Reports', 'Export & analytics', FileText], ['Flagged', 'Priority queue', Flag]] as const
   return <section className="admin-home">
     <div className="admin-brand"><span>BIKETRACK ADMIN</span><small>RECORD-KEEPING CONTROL CENTER</small></div>
@@ -250,8 +302,8 @@ function AdminTransactionsScreen({ onNavigate, onSelectTransaction }: { onNaviga
   const [filter, setFilter] = useState<string>('All')
   const flagStatus = filter === 'Flagged' ? 'FLAGGED' : undefined
   const type = filter === 'Sales' ? 'SALE' : filter === 'Transfers' ? 'TRANSFER' : undefined
-  const { data, isLoading: loading } = useQuery({ queryKey: ['transactions', query, filter], queryFn: () => api.listTransactions({ q: query || undefined, flagStatus, type }) })
-  const transactions = data?.data ?? []
+  const { data, isLoading: loading, isFetchingNextPage, fetchNextPage, hasNextPage } = useInfiniteQuery({ queryKey: ['transactions', query, filter], queryFn: ({ pageParam = 1 }) => api.listTransactions({ q: query || undefined, flagStatus, type, page: pageParam as number }), getNextPageParam: (lastPage, pages) => lastPage.data.length >= 5 ? pages.length + 1 : undefined, initialPageParam: 1 })
+  const transactions = data?.pages.flatMap((p) => p.data) ?? []
   return <section className="admin-transactions">
     <div className="admin-page-heading"><div><p className="screen-kicker">CONTROL MODULE</p><h1>All Transactions</h1><p>Network-wide historical record</p></div>
       <button className="admin-icon-button" aria-label="Export transactions" onClick={() => api.downloadTransactionsXlsx().catch(() => undefined)}><Send size={15} /></button>
@@ -266,6 +318,7 @@ function AdminTransactionsScreen({ onNavigate, onSelectTransaction }: { onNaviga
       <ChevronRight size={15} /></button>)}
     </div>
     {!loading && transactions.length === 0 && <p className="empty-state">No transactions match this search.</p>}
+    {hasNextPage && <button className="secondary-button load-button" disabled={isFetchingNextPage} onClick={() => void fetchNextPage()}><Cloud size={14} /> {isFetchingNextPage ? 'Loading...' : 'Load more'}</button>}
   </section>
 }
 
@@ -340,12 +393,14 @@ function FlaggedQueueScreen({ onNavigate, onSelectTransaction }: { onNavigate: (
 }
 function BicycleInventoryScreen({ onNavigate, onSelectBicycle }: { onNavigate: (screen: Screen) => void; onSelectBicycle: (bike: api.Bicycle) => void }) {
   const [q, setQ] = useState('')
-  const { data } = useQuery({ queryKey: ['bicycles', q], queryFn: () => api.listBicycles(q || undefined) })
-  const bicycles = data?.data ?? []
+  const { data, isLoading, isFetchingNextPage, fetchNextPage, hasNextPage } = useInfiniteQuery({ queryKey: ['bicycles', q], queryFn: ({ pageParam = 1 }) => api.listBicycles(q || undefined, pageParam as number), getNextPageParam: (lastPage, pages) => lastPage.data.length >= 5 ? pages.length + 1 : undefined, initialPageParam: 1 })
+  const bicycles = data?.pages.flatMap((p) => p.data) ?? []
   return <AdminPanel title="Bicycle Inventory" kicker="REGISTRY INVENTORY">
     <div className="admin-search"><Search size={14} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search SN, Brand, or Owner..." /></div>
+    {isLoading && <p className="empty-state">Loading...</p>}
     {bicycles.map((bike) => <button className="inventory-item" key={bike.id} onClick={() => onSelectBicycle(bike)}><Bike size={18} /><strong>{bike.brand} {bike.model}<small>SN: {bike.frameNumber} · {bike.currentOwner?.name ?? '—'}</small></strong><em>{bike.status}</em><ChevronRight size={14} /></button>)}
-    {bicycles.length === 0 && <p className="empty-state">No bicycles found.</p>}
+    {!isLoading && bicycles.length === 0 && <p className="empty-state">No bicycles found.</p>}
+    {hasNextPage && <button className="secondary-button load-button" disabled={isFetchingNextPage} onClick={() => void fetchNextPage()}><Cloud size={14} /> {isFetchingNextPage ? 'Loading...' : 'Load more'}</button>}
   </AdminPanel>
 }
 function OwnershipChainScreen({ bicycle }: { bicycle: api.Bicycle | null }) {
@@ -393,6 +448,7 @@ function AgentManagementScreen({ onNavigate, onSelectAgent }: { onNavigate: (scr
         <strong>{agent.name}<small>{agent.isActive ? 'ACTIVE' : 'REVOKED'} · {agent._count.transactions} records</small></strong>
         <ChevronRight size={14} />
       </button>
+      <button className="quiet-button" style={{ fontSize: 11, padding: '3px 8px' }} onClick={() => { onSelectAgent(agent); onNavigate('agent-onboarding') }} aria-label={`Edit ${agent.name}`}>Edit</button>
       {agent.isActive && <button className="delete-agent" onClick={() => setPendingRevoke(agent.id)} aria-label={`Revoke ${agent.name}`}><Trash2 size={14} /></button>}
     </div>)}
     {!loading && filtered.length === 0 && <p className="empty-state">No agents found.</p>}
@@ -400,26 +456,34 @@ function AgentManagementScreen({ onNavigate, onSelectAgent }: { onNavigate: (scr
     {pendingRevoke && <div className="delete-confirm"><p>Revoke this agent?</p><small>They will no longer be able to log in.</small><div><button onClick={() => setPendingRevoke(null)}>Cancel</button><button className="danger-confirm" onClick={() => revoke(pendingRevoke)}>Revoke agent</button></div></div>}
   </AdminPanel>
 }
-function AgentOnboardingScreen({ onNavigate }: { onNavigate: (screen: Screen) => void }) {
-  const [form, setForm] = useState({ name: '', email: '', phone: '', password: '' })
+function AgentOnboardingScreen({ onNavigate, editAgent }: { onNavigate: (screen: Screen) => void; editAgent?: api.Agent | null }) {
+  const isEdit = !!editAgent
+  const [form, setForm] = useState({ name: editAgent?.name ?? '', email: editAgent?.email ?? '', phone: editAgent?.phone ?? '', password: '' })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const queryClient = useQueryClient()
   const update = (key: keyof typeof form, value: string) => setForm((f) => ({ ...f, [key]: value }))
   const submit = async () => {
     setSaving(true); setError(null)
-    try { await api.createAgent({ name: form.name, email: form.email, phone: form.phone || undefined, password: form.password }); queryClient.invalidateQueries({ queryKey: ['agents'] }); onNavigate('agent-management') }
-    catch { setError('Failed to create agent. Check all fields and try again.') }
+    try {
+      if (isEdit) {
+        await api.updateAgent(editAgent!.id, { name: form.name, email: form.email, phone: form.phone || undefined })
+      } else {
+        await api.createAgent({ name: form.name, email: form.email, phone: form.phone || undefined, password: form.password })
+      }
+      queryClient.invalidateQueries({ queryKey: ['agents'] }); onNavigate('agent-management')
+    }
+    catch { setError(isEdit ? 'Failed to update agent.' : 'Failed to create agent. Check all fields and try again.') }
     finally { setSaving(false) }
   }
-  const ready = form.name.trim() && form.email.trim() && form.password.length >= 12
-  return <AdminPanel title="Agent Onboarding" kicker="NEW FIELD AGENT">
+  const ready = form.name.trim() && form.email.trim() && (isEdit || form.password.length >= 12)
+  return <AdminPanel title={isEdit ? 'Edit Agent' : 'Agent Onboarding'} kicker={isEdit ? 'EDIT FIELD AGENT' : 'NEW FIELD AGENT'}>
     <label>Full legal name<input value={form.name} onChange={(e) => update('name', e.target.value)} placeholder="e.g. Marcus Thorne" /></label>
     <label>Official email<input type="email" value={form.email} onChange={(e) => update('email', e.target.value)} placeholder="agent@biketrack.gov" /></label>
     <label>Phone number<input type="tel" value={form.phone} onChange={(e) => update('phone', e.target.value)} placeholder="+233 24 000 0000" /></label>
-    <label>Password (min 12 chars)<input type="password" value={form.password} onChange={(e) => update('password', e.target.value)} /></label>
+    {!isEdit && <label>Password (min 12 chars)<input type="password" value={form.password} onChange={(e) => update('password', e.target.value)} /></label>}
     {error && <p className="error-text" style={{ color: '#e05' }}>{error}</p>}
-    <button className="admin-wide-button" disabled={!ready || saving} onClick={() => void submit()}>{saving ? 'Creating...' : 'Create agent credentials'} <ArrowRight size={14} /></button>
+    <button className="admin-wide-button" disabled={!ready || saving} onClick={() => void submit()}>{saving ? (isEdit ? 'Saving...' : 'Creating...') : (isEdit ? 'Save changes' : 'Create agent credentials')} <ArrowRight size={14} /></button>
   </AdminPanel>
 }
 function AgentTerminalScreen({ agent, onNavigate }: { agent: api.Agent | null; onNavigate: (screen: Screen) => void }) {
@@ -519,6 +583,7 @@ function TransactionFlow({ step, setStep, saved, onSave, onCancel, onViewOwner }
   const [serialOwner, setSerialOwner] = useState<PersonRecord | null>(null)
   const [serialConfirmed, setSerialConfirmed] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [partySubmitted, setPartySubmitted] = useState(false)
   const update = <K extends keyof TransactionDraft>(key: K, value: TransactionDraft[K]) => setDraft((current) => ({ ...current, [key]: value }))
   const verifySerial = async (): Promise<{ found: boolean; owner: PersonRecord | null }> => {
     const normalized = draft.frameNumber.trim()
@@ -581,26 +646,34 @@ function TransactionFlow({ step, setStep, saved, onSave, onCancel, onViewOwner }
       return
     }
     if (step === 2) { setStep(3); return }
-    if (step === 3) { setStep(4); return }
+    if (step === 3) {
+      const sellerOk = draft.sellerNationalId.length === 16 && draft.sellerName.trim() && draft.sellerPhone.length >= 10
+      const buyerOk = draft.buyerNationalId.length === 16 && draft.buyerName.trim() && draft.buyerPhone.length >= 10
+      if (!sellerOk || !buyerOk) { setPartySubmitted(true); return }
+      setStep(4); return
+    }
     if (step === 4) void saveTransaction()
   }
   return <section className="flow-screen"><div className="stepper">{steps.map((label, index) => <span key={label} className={index <= step ? 'current' : ''}><i>{index + 1}</i><small>{label}</small></span>)}</div>
     {step === 0 && <ChoiceStep type={draft.type} onTypeChange={(type) => update('type', type)} />}
     {step === 1 && <SerialStep value={draft.frameNumber} onChange={(value) => update('frameNumber', value)} checked={serialChecked} found={serialFound} owner={serialOwner} confirmed={serialConfirmed} onVerify={verifySerial} onConfirm={() => setSerialConfirmed(true)} onUse={() => setStep(3)} onViewOwner={onViewOwner} />}
     {step === 2 && <BicycleCaptureStep draft={draft} update={update} />}
-    {step === 3 && <PartyStep draft={draft} update={update} />}
+    {step === 3 && <PartyStep draft={draft} update={update} submitted={partySubmitted} />}
     {step === 4 && <ReviewStep draft={draft} total={total} onPrint={() => window.print()} />}
     <div className="flow-actions"><button className="quiet-button" onClick={step === 0 ? onCancel : () => setStep(step === 3 && serialFound ? 1 : step - 1)}>Back</button><button className="action-button" disabled={isSaving || (step === 2 && !draft.frameNumber.trim()) || (step === 3 && (!draft.sellerNationalId.trim() || !draft.sellerName.trim() || !draft.sellerPhone.trim() || !draft.buyerNationalId.trim() || !draft.buyerName.trim() || !draft.buyerPhone.trim()))} onClick={() => void next()}>{isSaving ? 'Saving...' : step === 4 ? 'Save transaction' : 'Continue'} <ArrowRight size={15} /></button></div>
   </section>
 }
 
 function ChoiceStep({ type, onTypeChange }: { type: TransactionDraft['type']; onTypeChange: (type: TransactionDraft['type']) => void }) { const options: [TransactionDraft['type'], string, string, typeof FileText][] = [['SALE', 'Sell', 'Record a sale and permanent change of ownership', FileText], ['TRANSFER', 'Ownership transfer', 'Transfer ownership without a sale price', MapPin]]; return <div className="flow-body"><h2>Select transaction type</h2><p>Choose the record type for this field operation. Both flows verify the people involved by national ID.</p>{options.map(([value, title, copy, Icon]) => <button className={`choice-card ${type === value ? 'selected-choice' : ''}`} key={value} onClick={() => onTypeChange(value)}><span><Icon size={19} /></span><b>{title}</b><small>{copy}</small><ChevronRight /></button>)}</div> }
-function SerialStep({ value, onChange, checked, found, owner, confirmed, onVerify, onConfirm, onUse, onViewOwner }: { value: string; onChange: (value: string) => void; checked: boolean; found: boolean; owner: PersonRecord | null; confirmed: boolean; onVerify: () => void; onConfirm: () => void; onUse: () => void; onViewOwner: (person: PersonRecord) => void }) { return <div className="flow-body"><h2>Verify serial number</h2><p>Check the local database before creating a bicycle record.</p><label>Frame serial number<div className="serial-input"><QrCode size={16} /><input value={value} onChange={(event) => onChange(event.target.value)} placeholder="E.G. AB12345678" /><Smartphone size={16} /></div></label><button className="secondary-button" onClick={() => void onVerify()}><Search size={15} /> Verify database</button>{checked && found && <div className="duplicate-warning"><ShieldAlert size={17} /><span><strong>Duplicate bicycle found</strong><small>This serial is already linked to an owner. Resolve the issue before continuing.</small>{owner && <><button className="owner-details-link" onClick={() => onViewOwner(owner)}>View owner details <ArrowRight size={12} /></button><div className="owner-details"><b>{owner.name}</b><small>{owner.nationalId} · {owner.phone}</small><small>{owner.sector} · {owner.village}</small></div></>}</span><div className="duplicate-actions">{confirmed ? <Check className="confirmation-check" size={17} /> : <button className="confirm-warning" onClick={onConfirm}>Issue resolved</button>}<button className="use-bicycle-btn" onClick={onUse}>Use this bicycle <ArrowRight size={12} /></button></div></div>}{checked && !found && <div className="verification-result not-found"><Check size={15} /><span><strong>Serial available</strong><small>No bicycle record was found. Continue to capture the bicycle.</small></span></div>}<p className="section-label">Common serial locations</p><div className="location-grid"><span>Bottom bracket<b>Under pedals</b></span><span>Head tube<b>Front of frame</b></span><span>Seat tube<b>Near saddle</b></span><span>Rear dropout<b>Back wheel hub</b></span></div></div> }
+function SerialStep({ value, onChange, checked, found, owner, confirmed, onVerify, onConfirm, onUse, onViewOwner }: { value: string; onChange: (value: string) => void; checked: boolean; found: boolean; owner: PersonRecord | null; confirmed: boolean; onVerify: () => void; onConfirm: () => void; onUse: () => void; onViewOwner: (person: PersonRecord) => void }) {
+  const [verifying, setVerifying] = useState(false)
+  const handleVerify = () => { setVerifying(true); Promise.resolve(onVerify()).finally(() => setVerifying(false)) }
+  return <div className="flow-body"><h2>Verify serial number</h2><p>Check the local database before creating a bicycle record.</p><label>Frame serial number<div className="serial-input"><QrCode size={16} /><input value={value} onChange={(event) => onChange(event.target.value)} placeholder="E.G. AB12345678" /><Smartphone size={16} /></div></label><button className="secondary-button" disabled={verifying} onClick={handleVerify}><Search size={15} /> {verifying ? 'Verifying...' : 'Verify database'}</button>{checked && found && <div className="duplicate-warning"><ShieldAlert size={17} /><span><strong>Duplicate bicycle found</strong><small>This serial is already linked to an owner. Resolve the issue before continuing.</small>{owner && <><button className="owner-details-link" onClick={() => onViewOwner(owner)}>View owner details <ArrowRight size={12} /></button><div className="owner-details"><b>{owner.name}</b><small>{owner.nationalId} · {owner.phone}</small><small>{owner.sector} · {owner.village}</small></div></>}</span><div className="duplicate-actions">{confirmed ? <Check className="confirmation-check" size={17} /> : <button className="confirm-warning" onClick={onConfirm}>Issue resolved</button>}<button className="use-bicycle-btn" onClick={onUse}>Use this bicycle <ArrowRight size={12} /></button></div></div>}{checked && !found && <div className="verification-result not-found"><Check size={15} /><span><strong>Serial available</strong><small>No bicycle record was found. Continue to capture the bicycle.</small></span></div>}<p className="section-label">Common serial locations</p><div className="location-grid"><span>Bottom bracket<b>Under pedals</b></span><span>Head tube<b>Front of frame</b></span><span>Seat tube<b>Near saddle</b></span><span>Rear dropout<b>Back wheel hub</b></span></div></div> }
 function BicycleCaptureStep({ draft, update }: { draft: TransactionDraft; update: <K extends keyof TransactionDraft>(key: K, value: TransactionDraft[K]) => void }) {
   const [serialLocked, setSerialLocked] = useState(!!draft.frameNumber)
   return <div className="flow-body"><h2>Record the bicycle</h2><p>Capture the bicycle details before recording the parties.</p>{serialLocked ? <div className="capture-summary"><span>Frame serial<strong>{draft.frameNumber}</strong></span><span className="not-found-label">New bicycle record</span></div> : <label>Frame serial number<div className="serial-input"><QrCode size={16} /><input value={draft.frameNumber} onChange={(event) => update('frameNumber', event.target.value)} onBlur={() => { if (draft.frameNumber.trim()) setSerialLocked(true) }} placeholder="E.G. AB12345678" /></div></label>}<div className="two-fields"><label>Brand<input value={draft.bicycleBrand} onChange={(event) => update('bicycleBrand', event.target.value)} placeholder="e.g. Trek" /></label><label>Model<input value={draft.bicycleModel} onChange={(event) => update('bicycleModel', event.target.value)} placeholder="e.g. Marlin 7" /></label></div><div className="two-fields"><label>Color<input value={draft.bicycleColor} onChange={(event) => update('bicycleColor', event.target.value)} placeholder="e.g. black" /></label><label>Photo reference<input placeholder="Optional photo ID" /></label></div><label>Distinguishing features<textarea value={draft.distinguishingFeatures} onChange={(event) => update('distinguishingFeatures', event.target.value)} placeholder="Scratches, markings, accessories" /></label></div> }
-function PartyStep({ draft, update }: { draft: TransactionDraft; update: <K extends keyof TransactionDraft>(key: K, value: TransactionDraft[K]) => void }) { return <div className="flow-body"><h2>Record both parties</h2><p>National ID is the primary identifier. Capture contact and local area details for each participant.</p><PartyFields label="Seller (outbound)" prefix="seller" draft={draft} update={update} /><PartyFields label="Buyer (inbound)" prefix="buyer" draft={draft} update={update} /><label>Reason for transfer or mismatch<textarea value={draft.reason} onChange={(event) => update('reason', event.target.value)} placeholder="Required when seller differs from current owner" /></label><div className="price-fields"><label>Bicycle price<input type="number" min="0" value={draft.bicyclePrice} onChange={(event) => update('bicyclePrice', event.target.value)} placeholder="0.00" /></label><label>Service fee<input type="number" min="0" value={draft.serviceFee} onChange={(event) => update('serviceFee', event.target.value)} /></label></div></div> }
-function PartyFields({ label, prefix, draft, update }: { label: string; prefix: 'seller' | 'buyer'; draft: TransactionDraft; update: <K extends keyof TransactionDraft>(key: K, value: TransactionDraft[K]) => void }) {
+function PartyStep({ draft, update, submitted }: { draft: TransactionDraft; update: <K extends keyof TransactionDraft>(key: K, value: TransactionDraft[K]) => void; submitted?: boolean }) { return <div className="flow-body"><h2>Record both parties</h2><p>National ID is the primary identifier. Capture contact and local area details for each participant.</p><PartyFields label="Seller (outbound)" prefix="seller" draft={draft} update={update} submitted={submitted} /><PartyFields label="Buyer (inbound)" prefix="buyer" draft={draft} update={update} submitted={submitted} /><label>Reason for transfer or mismatch<textarea value={draft.reason} onChange={(event) => update('reason', event.target.value)} placeholder="Required when seller differs from current owner" /></label><div className="price-fields"><label>Bicycle price<input type="number" min="0" value={draft.bicyclePrice} onChange={(event) => update('bicyclePrice', event.target.value)} placeholder="0.00" /></label><label>Service fee<input type="number" min="0" value={draft.serviceFee} onChange={(event) => update('serviceFee', event.target.value)} /></label></div></div> }
+function PartyFields({ label, prefix, draft, update, submitted }: { label: string; prefix: 'seller' | 'buyer'; draft: TransactionDraft; update: <K extends keyof TransactionDraft>(key: K, value: TransactionDraft[K]) => void; submitted?: boolean }) {
   const [lookupState, setLookupState] = useState<'idle' | 'checking' | 'found' | 'missing'>('idle')
   const lookup = async () => {
     const nationalId = draft[`${prefix}NationalId`].trim()
@@ -630,8 +703,18 @@ function PartyFields({ label, prefix, draft, update }: { label: string; prefix: 
       setLookupState('found')
     }
   }
+  const errors = submitted ? {
+
+    [`${prefix}NationalId`]: draft[`${prefix}NationalId`].length !== 16,
+
+    [`${prefix}Name`]: !draft[`${prefix}Name`].trim(),
+
+    [`${prefix}Phone`]: draft[`${prefix}Phone`].length < 10,
+
+  } : {} as Record<string, boolean>
+
   const status = lookupState === 'found' ? <div className="person-link-status found"><Check size={13} /> Existing person linked from database</div> : lookupState === 'missing' ? <div className="person-link-status missing"><UserRound size={13} /> Person not found. Complete the fields to create a new person.</div> : null
-  return <fieldset className="party-fieldset"><legend>{label}</legend><div className="person-id-lookup"><label>National ID (16 characters)<input value={draft[`${prefix}NationalId`]} maxLength={16} onChange={(event) => { update(`${prefix}NationalId`, event.target.value); setLookupState('idle') }} placeholder="Enter 16-character national ID" /></label><button className="secondary-button" disabled={lookupState === 'checking' || draft[`${prefix}NationalId`].length !== 16} onClick={() => void lookup()}>{lookupState === 'checking' ? 'Checking...' : 'Look up person'}</button></div>{status}<label>Name<input value={draft[`${prefix}Name`]} readOnly={lookupState === 'found'} onChange={(event) => update(`${prefix}Name`, event.target.value)} placeholder="Full legal name" /></label><div className="two-fields"><label>Phone<input value={draft[`${prefix}Phone`]} readOnly={lookupState === 'found'} onChange={(event) => update(`${prefix}Phone`, event.target.value)} placeholder="Primary phone" /></label><label>Cell<input value={draft[`${prefix}Cell`]} readOnly={lookupState === 'found'} onChange={(event) => update(`${prefix}Cell`, event.target.value)} placeholder="Cell number" /></label></div><div className="two-fields"><label>Sector<input value={draft[`${prefix}Sector`]} readOnly={lookupState === 'found'} onChange={(event) => update(`${prefix}Sector`, event.target.value)} placeholder="Sector" /></label><label>Village<input value={draft[`${prefix}Village`]} readOnly={lookupState === 'found'} onChange={(event) => update(`${prefix}Village`, event.target.value)} placeholder="Village" /></label></div><NationalIdCamera photoUrl={draft[`${prefix}NationalIdPhotoUrl`]} onCapture={(url) => update(`${prefix}NationalIdPhotoUrl`, url)} /></fieldset>
+  return <fieldset className="party-fieldset"><legend>{label}</legend><div className="person-id-lookup"><label>National ID <span style={{ float: 'right', fontSize: 11, color: draft[`${prefix}NationalId`].length === 16 ? '#4caf7d' : '#e05' }}>{draft[`${prefix}NationalId`].length}/16</span><input value={draft[`${prefix}NationalId`]} maxLength={16} onChange={(event) => { update(`${prefix}NationalId`, event.target.value); setLookupState('idle') }} placeholder="Enter 16-character national ID" style={errors[`${prefix}NationalId`] ? { borderColor: '#e05' } : undefined} /></label><button className="secondary-button" disabled={lookupState === 'checking' || draft[`${prefix}NationalId`].length !== 16} onClick={() => void lookup()}>{lookupState === 'checking' ? 'Checking...' : 'Look up person'}</button></div>{status}<label>Name<input value={draft[`${prefix}Name`]} readOnly={lookupState === 'found'} onChange={(event) => update(`${prefix}Name`, event.target.value)} placeholder="Full legal name" style={errors[`${prefix}Name`] ? { borderColor: '#e05' } : undefined} /></label><div className="two-fields"><label style={{ position: 'relative', paddingBottom: 18 }}>Phone<input value={draft[`${prefix}Phone`]} readOnly={lookupState === 'found'} onChange={(event) => update(`${prefix}Phone`, event.target.value)} placeholder="Primary phone" style={errors[`${prefix}Phone`] ? { borderColor: '#e05' } : undefined} />{draft[`${prefix}Phone`].length > 0 ? (draft[`${prefix}Phone`].length >= 10 ? <small style={{ position: 'absolute', bottom: 2, left: 0, color: '#4caf7d' }}>&#10003; Valid</small> : <small style={{ position: 'absolute', bottom: 2, left: 0, color: '#e05' }}>{draft[`${prefix}Phone`].length}/10 min</small>) : errors[`${prefix}Phone`] ? <small style={{ position: 'absolute', bottom: 2, left: 0, color: '#e05' }}>Required</small> : null}</label><label style={{ paddingBottom: 18 }}>Cell<input value={draft[`${prefix}Cell`]} readOnly={lookupState === 'found'} onChange={(event) => update(`${prefix}Cell`, event.target.value)} placeholder="Cell number" /></label></div><div className="two-fields"><label>Sector<input value={draft[`${prefix}Sector`]} readOnly={lookupState === 'found'} onChange={(event) => update(`${prefix}Sector`, event.target.value)} placeholder="Sector" /></label><label>Village<input value={draft[`${prefix}Village`]} readOnly={lookupState === 'found'} onChange={(event) => update(`${prefix}Village`, event.target.value)} placeholder="Village" /></label></div><NationalIdCamera photoUrl={draft[`${prefix}NationalIdPhotoUrl`]} onCapture={(url) => update(`${prefix}NationalIdPhotoUrl`, url)} /></fieldset>
 }
 function ReviewStep({ draft, total, onPrint }: { draft: TransactionDraft; total: number; onPrint: () => void }) { return <div className="flow-body"><h2>Review transaction</h2><p>Check the record before saving. The PDF is formatted for printing and contains the transaction summary.</p><div className="review-summary"><span>Transaction type<strong>{draft.type === 'SALE' ? 'Ownership transfer / sale' : 'Ownership transfer'}</strong></span><span>Bicycle<strong>{draft.bicycleBrand || 'New'} {draft.bicycleModel || 'record'} · {draft.frameNumber || 'No serial'}</strong></span><span>Seller and buyer<strong>{draft.sellerName || 'Seller pending'} → {draft.buyerName || 'Buyer pending'}</strong></span><span>Amounts<strong>Bicycle {draft.bicyclePrice || '0.00'} + service {draft.serviceFee || '0.00'} = {total.toFixed(2)}</strong></span></div><button className="secondary-button print-button" onClick={onPrint}><FileText size={15} /> Preview / print transaction PDF</button><div className="audit-note"><ShieldCheck size={15} /> This action will be added to the audit log.</div></div> }
 
@@ -648,6 +731,8 @@ function RegisterScreen({ saved, onSave, onCancel, onViewOwner }: { saved: boole
   const [personChecked, setPersonChecked] = useState(false)
   const [personQueryError, setPersonQueryError] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [personNewSubmitted, setPersonNewSubmitted] = useState(false)
+  const [serialChecking, setSerialChecking] = useState(false)
   const [serialLocked, setSerialLocked] = useState(false)
   const [newPerson, setNewPerson] = useState({ name: '', nationalId: '', phone: '', cell: '', sector: '', village: '', nationalIdPhotoUrl: '' })
   const updateBicycle = (key: keyof Omit<RegistrationDraft, 'person'>, value: string) => setDraft((current) => ({ ...current, [key]: value }))
@@ -708,10 +793,10 @@ function RegisterScreen({ saved, onSave, onCancel, onViewOwner }: { saved: boole
   const steps = ['Serial', 'Bicycle', 'Person', 'Review', 'Done']
   const person = draft.person
   return <section className="flow-screen"><div className="stepper">{steps.map((label, index) => <span key={label} className={index <= (phase === 'serial' ? 0 : phase === 'bicycle' ? 1 : phase === 'person-search' || phase === 'person-new' ? 2 : 3) ? 'current' : ''}><i>{index + 1}</i><small>{label}</small></span>)}</div>
-    {phase === 'serial' && <div className="flow-body" style={{ paddingBottom: 0 }}><h2>Verify bicycle serial</h2><p>Check the database before creating a registration. A bicycle serial can only be registered once.</p><label>Frame serial number<div className="serial-input"><QrCode size={16} /><input value={draft.frameNumber} onChange={(event) => { updateBicycle('frameNumber', event.target.value); setSerialChecked(false); setSerialOwner(null); setSerialConfirmed(false) }} placeholder="E.G. ABT-2024-00918" /><Smartphone size={16} /></div></label><button className="secondary-button" onClick={() => void verifySerial()}><Search size={15} /> Check bicycle database</button>{serialChecked && serialOwner && <div className="duplicate-warning"><ShieldAlert size={17} /><span><strong>Serial already registered</strong><small>This bicycle is linked to {serialOwner.name}. Resolve this issue before continuing.</small><button className="owner-details-link" onClick={() => onViewOwner(serialOwner)}>View owner details <ArrowRight size={12} /></button><div className="owner-details"><b>{serialOwner.name}</b><small>{serialOwner.nationalId} · {serialOwner.phone}</small><small>{serialOwner.sector} · {serialOwner.village}</small></div></span><div className="duplicate-actions">{serialConfirmed ? <Check className="confirmation-check" size={17} /> : <button className="confirm-warning" onClick={() => setSerialConfirmed(true)}>Issue resolved</button>}<button className="use-bicycle-btn" onClick={() => setPhase('person-search')}>Use this bicycle <ArrowRight size={12} /></button></div></div>}{serialChecked && !serialOwner && <div className="verification-result not-found"><Check size={15} /><span><strong>Serial available</strong><small>No bicycle record was found. Continue to capture the bicycle.</small></span></div>}</div>}
+    {phase === 'serial' && <div className="flow-body" style={{ paddingBottom: 0 }}><h2>Verify bicycle serial</h2><p>Check the database before creating a registration. A bicycle serial can only be registered once.</p><label>Frame serial number<div className="serial-input"><QrCode size={16} /><input value={draft.frameNumber} onChange={(event) => { updateBicycle('frameNumber', event.target.value); setSerialChecked(false); setSerialOwner(null); setSerialConfirmed(false) }} placeholder="E.G. ABT-2024-00918" /><Smartphone size={16} /></div></label><button className="secondary-button" disabled={serialChecking} onClick={() => { setSerialChecking(true); void verifySerial().finally(() => setSerialChecking(false)) }}><Search size={15} /> {serialChecking ? 'Checking...' : 'Check bicycle database'}</button>{serialChecked && serialOwner && <div className="duplicate-warning"><ShieldAlert size={17} /><span><strong>Serial already registered</strong><small>This bicycle is linked to {serialOwner.name}. Resolve this issue before continuing.</small><button className="owner-details-link" onClick={() => onViewOwner(serialOwner)}>View owner details <ArrowRight size={12} /></button><div className="owner-details"><b>{serialOwner.name}</b><small>{serialOwner.nationalId} · {serialOwner.phone}</small><small>{serialOwner.sector} · {serialOwner.village}</small></div></span><div className="duplicate-actions">{serialConfirmed ? <Check className="confirmation-check" size={17} /> : <button className="confirm-warning" onClick={() => setSerialConfirmed(true)}>Issue resolved</button>}<button className="use-bicycle-btn" onClick={() => setPhase('person-search')}>Use this bicycle <ArrowRight size={12} /></button></div></div>}{serialChecked && !serialOwner && <div className="verification-result not-found"><Check size={15} /><span><strong>Serial available</strong><small>No bicycle record was found. Continue to capture the bicycle.</small></span></div>}</div>}
     {phase === 'bicycle' && <div className="flow-body"><h2>Record bicycle details</h2><p>Capture the bicycle before linking its current owner.</p>{serialLocked ? <div className="capture-summary"><span>Frame serial<strong>{draft.frameNumber}</strong></span><span className="not-found-label">Available to register</span></div> : <label>Frame serial number<div className="serial-input"><QrCode size={16} /><input value={draft.frameNumber} onChange={(event) => updateBicycle('frameNumber', event.target.value)} onBlur={() => { if (draft.frameNumber.trim()) setSerialLocked(true) }} placeholder="E.G. ABT-2024-00918" /></div></label>}<div className="two-fields"><label>Brand<input value={draft.brand} onChange={(event) => updateBicycle('brand', event.target.value)} placeholder="e.g. Trek" /></label><label>Model<input value={draft.model} onChange={(event) => updateBicycle('model', event.target.value)} placeholder="e.g. Marlin 7" /></label></div><div className="two-fields"><label>Color<input value={draft.color} onChange={(event) => updateBicycle('color', event.target.value)} placeholder="e.g. black" /></label><label>Photo reference<input placeholder="Optional photo ID" /></label></div><label>Distinguishing features<textarea value={draft.features} onChange={(event) => updateBicycle('features', event.target.value)} placeholder="Scratches, markings, accessories" /></label></div>}
     {phase === 'person-search' && <div className="flow-body"><h2>Find current owner</h2><p>Search by name or national ID. National ID is the primary person identifier.</p><label>Name or national ID<div className="search-field"><Search size={15} /><input value={personQuery} onChange={(event) => { setPersonQuery(event.target.value); setPersonQueryError(false); if (!event.target.value) { setPersonChecked(false); setDraft((current) => ({ ...current, person: null })) } }} placeholder="Search person in database" /></div></label><button className="secondary-button" onClick={findPerson}><Search size={15} /> Find person</button>{personQueryError && <p className="error-text" style={{ color: '#e05', fontSize: 12, margin: '4px 0' }}>Enter a name or national ID to search.</p>}{personChecked && person && <div className="person-found"><Check size={16} /><span><strong>{person.name}</strong><small>{person.nationalId} · {person.phone}</small><small>{person.sector} · {person.village}</small></span></div>}{personChecked && !person && <div className="person-not-found"><UserRound size={16} /><span><strong>Person not found</strong><small>No person matches this search. Add the owner to the database.</small></span><button onClick={() => setPhase('person-new')}>Add new person <ArrowRight size={14} /></button></div>}</div>}
-    {phase === 'person-new' && <div className="flow-body"><h2>Add person to database</h2><p>Create the owner record first, then it will be linked to this bicycle registration.</p><label>Full name<input value={newPerson.name} onChange={(event) => updatePerson('name', event.target.value)} placeholder="Full legal name" /></label><label>National ID (16 characters)<input value={newPerson.nationalId} maxLength={16} onChange={(event) => updatePerson('nationalId', event.target.value)} placeholder="Enter 16-character national ID" /></label><div className="two-fields"><label>Phone<input value={newPerson.phone} onChange={(event) => updatePerson('phone', event.target.value)} placeholder="Primary phone" /></label><label>Cell<input value={newPerson.cell} onChange={(event) => updatePerson('cell', event.target.value)} placeholder="Cell number" /></label></div><div className="two-fields"><label>Sector<input value={newPerson.sector} onChange={(event) => updatePerson('sector', event.target.value)} placeholder="Sector" /></label><label>Village<input value={newPerson.village} onChange={(event) => updatePerson('village', event.target.value)} placeholder="Village" /></label></div><NationalIdCamera photoUrl={newPerson.nationalIdPhotoUrl} onCapture={(url) => updatePerson('nationalIdPhotoUrl', url)} /></div>}
+    {phase === 'person-new' && <div className="flow-body"><h2>Add person to database</h2><p>Create the owner record first, then it will be linked to this bicycle registration.</p><label>Full name<input value={newPerson.name} onChange={(event) => { updatePerson('name', event.target.value); setPersonNewSubmitted(false) }} placeholder="Full legal name" style={personNewSubmitted && !newPerson.name.trim() ? { borderColor: '#e05' } : undefined} />{personNewSubmitted && !newPerson.name.trim() && <small style={{ color: '#e05', fontSize: 11 }}>Required</small>}</label><label>National ID <span style={{ float: 'right', fontSize: 11, color: newPerson.nationalId.length === 16 ? '#4caf7d' : (personNewSubmitted && newPerson.nationalId.length !== 16 ? '#e05' : '#e05') }}>{newPerson.nationalId.length}/16</span><input value={newPerson.nationalId} maxLength={16} onChange={(event) => { updatePerson('nationalId', event.target.value); setPersonNewSubmitted(false) }} placeholder="Enter 16-character national ID" style={personNewSubmitted && newPerson.nationalId.length !== 16 ? { borderColor: '#e05' } : undefined} /></label><div className="two-fields"><label style={{ position: 'relative', paddingBottom: 18 }}>Phone<input value={newPerson.phone} onChange={(event) => updatePerson('phone', event.target.value)} placeholder="Primary phone" />{newPerson.phone.length > 0 ? (newPerson.phone.length >= 10 ? <small style={{ position: 'absolute', bottom: 2, left: 0, color: '#4caf7d' }}>&#10003; Valid</small> : <small style={{ position: 'absolute', bottom: 2, left: 0, color: '#e05' }}>{newPerson.phone.length}/10 min</small>) : null}</label><label style={{ paddingBottom: 18 }}>Cell<input value={newPerson.cell} onChange={(event) => updatePerson('cell', event.target.value)} placeholder="Cell number" /></label></div><div className="two-fields"><label>Sector<input value={newPerson.sector} onChange={(event) => updatePerson('sector', event.target.value)} placeholder="Sector" /></label><label>Village<input value={newPerson.village} onChange={(event) => updatePerson('village', event.target.value)} placeholder="Village" /></label></div><NationalIdCamera photoUrl={newPerson.nationalIdPhotoUrl} onCapture={(url) => updatePerson('nationalIdPhotoUrl', url)} /></div>}
     {phase === 'review' && <div className="flow-body"><h2>Review registration</h2><p>Confirm the bicycle and its linked current owner before saving.</p><div className="review-summary"><span>Bicycle<strong>{draft.brand || 'New'} {draft.model || 'bicycle'} · {draft.frameNumber}</strong></span><span>Owner<strong>{person?.name}</strong></span><span>National ID<strong>{person?.nationalId}</strong></span><span>Location<strong>{person?.sector} · {person?.village}</strong></span></div><div className="audit-note"><ShieldCheck size={15} /> Registration and owner link will be audited.</div></div>}
     <div className="flow-actions"><button className="quiet-button" onClick={phase === 'serial' ? onCancel : () => setPhase(phase === 'person-new' ? 'person-search' : phase === 'review' ? 'person-search' : phase === 'person-search' ? 'bicycle' : 'serial')}>Back</button><button className="action-button" disabled={(phase === 'bicycle' && (!draft.frameNumber.trim() || !draft.brand.trim())) || (phase === 'person-new' && (!newPerson.name || newPerson.nationalId.length !== 16)) || (isSaving && phase !== 'serial')} onClick={() => void (async () => {
       if (phase === 'serial') {
@@ -720,7 +805,10 @@ function RegisterScreen({ saved, onSave, onCancel, onViewOwner }: { saved: boole
         setPhase(serialChecked && serialOwner ? 'person-search' : 'bicycle')
       } else if (phase === 'bicycle') setPhase('person-search')
       else if (phase === 'person-search') setPhase(person ? 'review' : 'person-new')
-      else if (phase === 'person-new') { setDraft((current) => ({ ...current, person: { id: `person-${newPerson.nationalId}`, ...newPerson } })); setPhase('review') }
+      else if (phase === 'person-new') {
+        if (!newPerson.name.trim() || newPerson.nationalId.length !== 16) { setPersonNewSubmitted(true); return }
+        setDraft((current) => ({ ...current, person: { id: `person-${newPerson.nationalId}`, ...newPerson } })); setPhase('review')
+      }
       else void saveRegistration()
     })()}>{isSaving ? 'Saving...' : phase === 'review' ? 'Save registration' : 'Continue'} <ArrowRight size={15} /></button></div>
   </section>
@@ -945,6 +1033,7 @@ function ActivityScreen({ onOpenDetails, onSelectTransaction }: { onOpenDetails:
 
 
 function ProfileScreen({ user, role, fontSize, onChangeFontSize, onLogout, section, onSectionChange }: { user: { id: string; name: string; role: Role } | null; role: Role; fontSize: 'sm' | 'md' | 'lg'; onChangeFontSize: (v: 'sm' | 'md' | 'lg') => void; onLogout: () => void; section: 'main' | 'password' | 'sync' | 'cache'; onSectionChange: (s: 'main' | 'password' | 'sync' | 'cache') => void }) {
+  const [loggingOut, setLoggingOut] = useState(false)
   const initials = user ? user.name.split(' ').map((p) => p[0]).join('').slice(0, 2).toUpperCase() : 'MO'
   const isAdmin = role === 'ADMIN'
   const setSection = onSectionChange
@@ -1053,7 +1142,7 @@ function ProfileScreen({ user, role, fontSize, onChangeFontSize, onLogout, secti
       <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Signal size={17} /> App info</span>
       <small style={{ paddingLeft: 23, color: '#7f8d87' }}>v{import.meta.env.VITE_APP_VERSION ?? '1.0.0'} · API: {import.meta.env.VITE_API_URL ?? 'localhost:4000'}</small>
     </div>
-    <button className="logout-button" style={{ marginTop: 16 }} onClick={onLogout}>End session &amp; secure logs <LockKeyhole size={15} /></button>
+    <button className="logout-button" style={{ marginTop: 16 }} disabled={loggingOut} onClick={() => { setLoggingOut(true); Promise.resolve(onLogout()).finally(() => setLoggingOut(false)) }}>{loggingOut ? 'Logging out...' : 'End session & secure logs'} <LockKeyhole size={15} /></button>
   </section>
 }
 

@@ -5,8 +5,19 @@ type ApiEnvelope<T> = { data: T }
 let refreshPromise: Promise<void> | null = null
 
 async function silentRefresh(): Promise<void> {
-  const result = await fetch(`${API_URL}/auth/refresh`, { method: 'POST', credentials: 'include' })
-  if (!result.ok) { localStorage.removeItem('abatco_token'); throw new Error('Session expired') }
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 15000)
+  let result: Response
+  try {
+    result = await fetch(`${API_URL}/auth/refresh`, { method: 'POST', credentials: 'include', signal: controller.signal })
+  } catch (err) {
+    // Network failure or timeout — do NOT clear the token
+    throw Object.assign(new Error('Network error during refresh'), { isNetworkError: true })
+  } finally {
+    clearTimeout(timeout)
+  }
+  if (result.status === 401) { localStorage.removeItem('abatco_token'); throw new Error('Session expired') }
+  if (!result.ok) throw Object.assign(new Error('Refresh server error'), { isNetworkError: true })
   const json = await result.json() as ApiEnvelope<{ token: string }>
   localStorage.setItem('abatco_token', json.data.token)
 }
@@ -154,7 +165,7 @@ export type AgentPermissions = { canRegister?: boolean; canTransfer?: boolean; c
 export type Agent = { id: string; name: string; email: string; phone?: string; isActive: boolean; createdAt: string; permissions: AgentPermissions; _count: { transactions: number } }
 
 export async function getDashboard() {
-  return apiRequest<ApiEnvelope<{ bicycles: number; activeAgents: number; transactions: number; flags: number }>>('/admin/dashboard')
+  return apiRequest<ApiEnvelope<{ bicycles: number; activeAgents: number; transactions: number; flags: number; totalBicyclePrice: number; totalServiceFee: number }>>('/admin/dashboard')
 }
 
 export async function listAgents(page = 1) {
@@ -163,6 +174,10 @@ export async function listAgents(page = 1) {
 
 export async function createAgent(data: { name: string; email: string; phone?: string; password: string }) {
   return apiRequest<ApiEnvelope<Agent>>('/admin/agents', { method: 'POST', body: JSON.stringify(data) })
+}
+
+export async function updateAgent(id: string, data: { name?: string; email?: string; phone?: string }) {
+  return apiRequest<ApiEnvelope<Agent>>(`/admin/agents/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
 }
 
 export async function revokeAgent(id: string) {

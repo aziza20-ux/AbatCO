@@ -10,7 +10,7 @@ import { sendOtpEmail } from '../mailer.js'
 const credentials = z.object({ email: z.string().email().max(254), password: z.string().min(1).max(200) })
 export const loginLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false })
 const cookieMaxAge = 30 * 24 * 60 * 60
-const cookieOptions = `HttpOnly; Path=/api/auth; SameSite=Lax; Max-Age=${cookieMaxAge}`
+const cookieOptions = `HttpOnly; Path=/api/auth; SameSite=None; Secure; Max-Age=${cookieMaxAge}`
 const refreshValue = (request: Request) => request.header('x-refresh-token') ?? request.header('cookie')?.split(';').map((part) => part.trim()).find((part) => part.startsWith('refresh_token='))?.slice('refresh_token='.length)
 
 export async function login(request: Request, response: Response) {
@@ -49,7 +49,7 @@ export async function logout(request: AuthRequest, response: Response) {
   const raw = refreshValue(request)
   if (raw) await revokeRefreshToken(raw)
   if (request.user) await audit(request.user.id, 'LOGOUT', 'User', request.user.id)
-  response.setHeader('Set-Cookie', 'refresh_token=; Max-Age=0; HttpOnly; Path=/api/auth; SameSite=Lax')
+  response.setHeader('Set-Cookie', 'refresh_token=; Max-Age=0; HttpOnly; Path=/api/auth; SameSite=None; Secure')
   return response.status(204).send()
 }
 
