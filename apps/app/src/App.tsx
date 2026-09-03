@@ -311,7 +311,7 @@ function AdminHomeScreen({ onNavigate, onManageProfile, onSetRegisterOrigin }: {
   })
   const stats = dashData?.data ?? null
   const fmt = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-  const metrics = [['Total registered', dashLoading ? '…' : stats ? String(stats.bicycles) : '0', TrendingUp], ['Active agents', stats ? String(stats.activeAgents) : '…', Users], ['Transactions', dashLoading ? '…' : stats ? String(stats.transactions) : '0', Cloud], ['Flagged alerts', dashLoading ? '…' : stats ? String(stats.flags) : '0', Flag], ['Total bicycle price', dashLoading ? '…' : stats ? fmt(stats.totalBicyclePrice) : '0.00', TrendingUp], ['Total service fee', dashLoading ? '…' : stats ? fmt(stats.totalServiceFee) : '0.00', Cloud]] as const
+  const metrics = [['Total registered', dashLoading ? '…' : stats ? String(stats.bicycles) : '0', TrendingUp], ['Active agents', stats ? String(stats.activeAgents) : '…', Users], ['Transactions', dashLoading ? '…' : stats ? String(stats.transactions) : '0', Cloud], ['Flagged alerts', dashLoading ? '…' : stats ? String(stats.flags) : '0', Flag], ['Bicycle price (RWF)', dashLoading ? '…' : stats ? fmt(stats.totalBicyclePrice) : '0.00', TrendingUp], ['Service fee (RWF)', dashLoading ? '…' : stats ? fmt(stats.totalServiceFee) : '0.00', Cloud]] as const
   const modules = [['Transactions', 'Historical log', Activity], ['Bicycles', 'Registry inventory', Bike], ['People', 'Owner directory', Users], ['Field agents', 'Team management', UserRound], ['Reports', 'Export & analytics', FileText], ['Flagged', 'Priority queue', Flag]] as const
 
   const filterLabel = dashFilter === 'today' ? 'Today'
