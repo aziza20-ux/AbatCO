@@ -17,7 +17,7 @@ const rw = {
 
   // Home — Hero
   'home.hero.eyebrow': 'Ubucuruzi bw\'ibinyabiziga byakozwe bwizewe',
-  'home.hero.heading1': 'Gura no kugurisha',
+  'home.hero.heading1': 'Kugura no kugurisha',
   'home.hero.heading2': 'ibinyabiziga byakozwe',
   'home.hero.heading3': 'wizeye.',
   'home.hero.text': 'Duhuza abantu bashaka kugura cyangwa kugurisha amagare no moto byakozwe, dufasha kwemeza amakuru y\'ibinyabiziga, gutegura amasezerano y\'igurishwa mu ikoranabuhanga, kandi tubika inyandiko z\'ibikorwa neza.',
