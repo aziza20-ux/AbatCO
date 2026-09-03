@@ -127,7 +127,7 @@ export async function updateBicycle(id: string, data: { brand?: string; model?: 
 // ── Transactions ──────────────────────────────────────────────────────────────
 
 export type PersonSummary = { id: string; name: string; nationalId?: string; phone?: string; cell?: string; sector?: string; village?: string; nationalIdPhotoUrl?: string }
-export type Transaction = { id: string; transactionId: string; type: 'SALE' | 'TRANSFER'; price?: number; serviceFee?: number; reason?: string; location?: string; transactionDate: string; flagStatus: string; flagReason?: string; agentNote?: string; adminReviewNotes?: string; bicycle: { id: string; frameNumber: string; brand?: string; model?: string }; seller?: PersonSummary; buyer?: PersonSummary; recordingAgent: { id: string; name: string } }
+export type Transaction = { id: string; transactionId: string; type: 'SALE' | 'TRANSFER'; price?: number; serviceFee?: number; reason?: string; location?: string; transactionDate: string; flagStatus: string; flagReason?: string; agentNote?: string; adminReviewNotes?: string; ownershipStatus: 'ACTIVE' | 'HISTORICAL'; bicycle: { id: string; frameNumber: string; brand?: string; model?: string }; seller?: PersonSummary; buyer?: PersonSummary; recordingAgent: { id: string; name: string } }
 
 export async function listTransactions(params?: { q?: string; flagStatus?: string; type?: string; agentId?: string; personId?: string; page?: number }) {
   const search = new URLSearchParams({ page: String(params?.page ?? 1), limit: '5', ...(params?.q ? { q: params.q } : {}), ...(params?.flagStatus ? { flagStatus: params.flagStatus } : {}), ...(params?.type ? { type: params.type } : {}), ...(params?.agentId ? { agentId: params.agentId } : {}), ...(params?.personId ? { personId: params.personId } : {}) })
@@ -146,6 +146,14 @@ export async function editTransaction(id: string, data: object) {
   return apiRequest<ApiEnvelope<Transaction>>(`/transactions/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
 }
 
+export async function flagTransaction(id: string, flagReason?: string) {
+  return apiRequest<ApiEnvelope<Transaction>>(`/transactions/${id}/flag`, { method: 'PATCH', body: JSON.stringify({ flagReason }) })
+}
+
+export async function agentReviewTransaction(id: string) {
+  return apiRequest<ApiEnvelope<Transaction>>(`/transactions/${id}/review`, { method: 'PATCH', body: JSON.stringify({}) })
+}
+
 // ── Registrations ─────────────────────────────────────────────────────────────
 
 export type Registration = { id: string; bicycleId: string; ownerId: string; createdAt: string; bicycle: { id: string; frameNumber: string; brand?: string; model?: string }; owner: PersonSummary & { nationalId: string }; recordingAgent: { id: string; name: string } }
@@ -157,6 +165,10 @@ export async function listRegistrations(params?: { bicycleId?: string; ownerId?:
 
 export async function createRegistration(data: { bicycleId: string; ownerId: string; clientOperationId: string }) {
   return apiRequest<ApiEnvelope<{ id: string }>>('/registrations', { method: 'POST', body: JSON.stringify(data) })
+}
+
+export async function updateRegistration(id: string, data: { bicycleId?: string; ownerId?: string }) {
+  return apiRequest<ApiEnvelope<Registration>>(`/registrations/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
 }
 
 // ── Admin ─────────────────────────────────────────────────────────────────────

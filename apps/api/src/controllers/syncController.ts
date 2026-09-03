@@ -129,6 +129,7 @@ async function applyTransaction(
     const mismatch = Boolean(body.sellerId && bicycle.currentOwnerId && body.sellerId !== bicycle.currentOwnerId)
     if (mismatch && !body.reason) return { status: 'VALIDATION_ERROR', conflictReason: 'A reason is required when seller differs from current owner' }
 
+    await tx.transaction.updateMany({ where: { bicycleId: body.bicycleId, ownershipStatus: 'ACTIVE' }, data: { ownershipStatus: 'HISTORICAL' } })
     const created = await tx.transaction.create({
       data: {
         transactionId: createTransactionId(),
@@ -145,6 +146,7 @@ async function applyTransaction(
         flagStatus: mismatch ? 'FLAGGED' : 'NONE',
         flagReason: mismatch ? (body.flagReason ?? 'Seller does not match current owner') : undefined,
         agentNote: body.agentNote,
+        ownershipStatus: 'ACTIVE',
       },
     })
     await tx.bicycle.update({ where: { id: bicycle.id }, data: { currentOwnerId: body.buyerId } })

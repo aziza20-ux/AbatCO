@@ -30,6 +30,11 @@ enum FlagStatus {
   CONFLICTED
 }
 
+enum OwnershipStatus {
+  ACTIVE
+  HISTORICAL
+}
+
 enum SyncOperationStatus {
   PENDING
   APPLIED
@@ -114,6 +119,7 @@ model Transaction {
   flagStatus        FlagStatus      @default(NONE)
   flagReason        String?
   agentNote         String?
+  ownershipStatus   OwnershipStatus @default(ACTIVE)
   serviceFee        Decimal?        @db.Decimal(12, 2)
   adminReviewedById String?
   adminReviewedBy   User?           @relation("AdminReviews", fields: [adminReviewedById], references: [id])
@@ -122,6 +128,7 @@ model Transaction {
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
   @@index([bicycleId, transactionDate])
+  @@index([bicycleId, ownershipStatus])
   @@index([recordingAgentId, transactionDate])
   @@index([transactionId])
 }
