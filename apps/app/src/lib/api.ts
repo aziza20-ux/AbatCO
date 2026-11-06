@@ -146,6 +146,10 @@ export async function editTransaction(id: string, data: { price?: number; servic
   return apiRequest<ApiEnvelope<Transaction>>(`/transactions/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
 }
 
+export async function deleteTransaction(id: string) {
+  return apiRequest<void>(`/transactions/${id}`, { method: 'DELETE' })
+}
+
 type PersonEdit = { id: string; name: string; nationalId: string; phone?: string | null; cell?: string | null; sector?: string | null; village?: string | null; nationalIdPhotoUrl?: string | null }
 
 export async function flagTransaction(id: string, flagReason?: string) {
@@ -165,12 +169,20 @@ export async function listRegistrations(params?: { bicycleId?: string; ownerId?:
   return apiRequest<ApiEnvelope<Registration[]>>(`/registrations?${search}`)
 }
 
+export async function getRegistration(id: string) {
+  return apiRequest<ApiEnvelope<Registration>>(`/registrations/${id}`)
+}
+
 export async function createRegistration(data: { bicycleId: string; ownerId: string; clientOperationId: string }) {
   return apiRequest<ApiEnvelope<{ id: string }>>('/registrations', { method: 'POST', body: JSON.stringify(data) })
 }
 
 export async function updateRegistration(id: string, data: { bicycleId?: string; ownerId?: string }) {
   return apiRequest<ApiEnvelope<Registration>>(`/registrations/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
+}
+
+export async function deleteRegistration(id: string) {
+  return apiRequest<void>(`/registrations/${id}`, { method: 'DELETE' })
 }
 
 // ── Admin ─────────────────────────────────────────────────────────────────────

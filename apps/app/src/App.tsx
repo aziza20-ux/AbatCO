@@ -145,7 +145,7 @@ export default function App() {
       {screen === 'home' && <HomeScreen onNavigate={go} onSelect={openDetails} pendingCount={pendingCount} isOnline={isOnline} setRegisterOrigin={setRegisterOrigin} />}
       {screen === 'admin-home' && <AdminHomeScreen onNavigate={go} onManageProfile={() => go('profile')} onSetRegisterOrigin={setRegisterOrigin} />}
       {screen === 'admin-transactions' && <AdminTransactionsScreen onNavigate={go} onSelectTransaction={(id) => { setSelectedTransactionId(id); setTransactionOrigin('admin-transactions') }} />}
-      {screen === 'transaction-record' && <AdminRecordScreen transactionId={selectedTransactionId} onNavigate={go} role={role} currentUserId={currentUser?.id ?? null} onEditTransaction={(id, draft) => { setEditTransactionDraft({ id, draft }); setTransactionStep(0); history.pushState({ screen: 'transaction' }, ''); setScreen('transaction') }} />}
+      {screen === 'transaction-record' && <AdminRecordScreen transactionId={selectedTransactionId} onNavigate={go} role={role} onDeleteTransaction={() => go(transactionOrigin)} onEditTransaction={(id, draft) => { setEditTransactionDraft({ id, draft }); setTransactionStep(0); history.pushState({ screen: 'transaction' }, ''); setScreen('transaction') }} />}
       {screen === 'flagged-queue' && <FlaggedQueueScreen onNavigate={go} onSelectTransaction={(id) => { setSelectedTransactionId(id); setTransactionOrigin('flagged-queue') }} />}
       {screen === 'bicycle-inventory' && <BicycleInventoryScreen onNavigate={go} onSelectBicycle={(bike) => { setSelectedOwnershipBicycle(bike); go('ownership-chain') }} />}
       {screen === 'ownership-chain' && <OwnershipChainScreen bicycle={selectedOwnershipBicycle} />}
@@ -156,7 +156,7 @@ export default function App() {
       {screen === 'transaction' && <TransactionFlow step={transactionStep} setStep={setTransactionStep} saved={saved} onSave={() => { setSaved(true); refreshPending() }} onCancel={() => { const wasEdit = !!editTransactionDraft; setEditTransactionDraft(null); go(wasEdit ? 'transaction-record' : role === 'ADMIN' ? 'admin-home' : 'home') }} onViewOwner={setOwnerDetails} editContext={editTransactionDraft} />}
       {screen === 'register' && <RegisterScreen onSave={() => { setSaved(true); refreshPending() }} saved={saved} onCancel={() => { const wasEdit = !!editRegistrationData; setEditRegistrationData(null); go(wasEdit ? 'details' : registerOrigin) }} onViewOwner={setOwnerDetails} editContext={editRegistrationData} />}
       {screen === 'search' && <SearchScreen query={query} setQuery={setQuery} onSelect={openDetails} />}
-      {screen === 'details' && selected && <DetailsScreen record={selected} role={role} currentUserId={currentUser?.id ?? null} onEditRegistration={(id, draft) => { setEditRegistrationData({ id, draft }); setRegisterOrigin(detailsOrigin as RegisterOrigin); history.pushState({ screen: 'register' }, ''); setScreen('register') }} />}
+      {screen === 'details' && selected && <DetailsScreen record={selected} role={role} onEditRegistration={(id, draft) => { setEditRegistrationData({ id, draft }); setRegisterOrigin(detailsOrigin as RegisterOrigin); history.pushState({ screen: 'register' }, ''); setScreen('register') }} onOpenTransaction={(id) => { setSelectedTransactionId(id); setTransactionOrigin('details'); go('transaction-record') }} />}
       {screen === 'activity' && <ActivityScreen onOpenDetails={openDetailsById} onSelectTransaction={(id) => { setSelectedTransactionId(id); setTransactionOrigin('activity'); go('transaction-record') }} />}
       {screen === 'people' && <PeopleScreen onSelectPerson={(p) => { setSelectedPerson(p); go('person-activity') }} />}
       {screen === 'person-activity' && <PersonActivityScreen person={selectedPerson} onSelectTransaction={(id) => { setSelectedTransactionId(id); setTransactionOrigin('person-activity'); go('transaction-record') }} onOpenDetails={openDetailsById} />}
@@ -371,17 +371,17 @@ function AdminTransactionsScreen({ onNavigate, onSelectTransaction }: { onNaviga
   </section>
 }
 
-function AdminRecordScreen({ transactionId, onNavigate, role, currentUserId, onEditTransaction }: { transactionId: string | null; onNavigate: (screen: Screen) => void; role: Role; currentUserId: string | null; onEditTransaction: (id: string, draft: TransactionDraft) => void }) {
+function AdminRecordScreen({ transactionId, onNavigate, role, onDeleteTransaction, onEditTransaction }: { transactionId: string | null; onNavigate: (screen: Screen) => void; role: Role; onDeleteTransaction: () => void; onEditTransaction: (id: string, draft: TransactionDraft) => void }) {
   const queryClient = useQueryClient()
   const { data, isLoading } = useQuery({ queryKey: ['transaction', transactionId], queryFn: () => api.getTransaction(transactionId!), enabled: !!transactionId })
   const [note, setNote] = useState('')
   const [noteOpen, setNoteOpen] = useState(false)
   const [flagReason, setFlagReason] = useState('')
   const [flagOpen, setFlagOpen] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const t = data?.data
   const isAdmin = role === 'ADMIN'
-  const isOwner = t?.recordingAgent?.id === currentUserId
-  const canEditTransaction = isAdmin || (role === 'AGENT' && isOwner)
+  const canEditTransaction = isAdmin || role === 'AGENT'
 
   const { mutate: adminReview, isPending: adminPending } = useMutation({
     mutationFn: (status: 'REVIEWED' | 'FLAGGED') => api.reviewTransaction(transactionId!, status, note || undefined),
@@ -429,6 +429,18 @@ function AdminRecordScreen({ transactionId, onNavigate, role, currentUserId, onE
     }
     onEditTransaction(t.id, draft)
   }
+  const deleteRecord = async () => {
+    if (!t || !window.confirm('Delete this transaction? This cannot be undone.')) return
+    setDeleteError(null)
+    try {
+      await api.deleteTransaction(t.id)
+      await queryClient.invalidateQueries({ queryKey: ['transactions'] })
+      await queryClient.invalidateQueries({ queryKey: ['bicycles'] })
+      onDeleteTransaction()
+    } catch {
+      setDeleteError('Could not delete this transaction. Check your connection and permissions.')
+    }
+  }
 
   const isPending = adminPending || flagPending || reviewPending
 
@@ -442,12 +454,13 @@ function AdminRecordScreen({ transactionId, onNavigate, role, currentUserId, onE
       {noteOpen && isAdmin && <label style={{ display: 'block', marginBottom: 8 }}>Admin note<textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional review note..." style={{ width: '100%', marginTop: 4 }} /></label>}
       {flagOpen && !isAdmin && <label style={{ display: 'block', marginBottom: 8 }}>Flag reason<textarea value={flagReason} onChange={(e) => setFlagReason(e.target.value)} placeholder="Describe the issue..." style={{ width: '100%', marginTop: 4 }} /></label>}
       <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+        {deleteError && <p className="error-text" style={{ flexBasis: '100%' }}>{deleteError}</p>}
         {isAdmin && t.flagStatus !== 'REVIEWED' && <button className="action-button" disabled={isPending} onClick={() => { setNoteOpen(true); adminReview('REVIEWED') }}>{adminPending ? 'Saving...' : <><Check size={13} /> Mark reviewed</>}</button>}
         {isAdmin && t.flagStatus !== 'FLAGGED' && <button className="admin-wide-button" style={{ background: 'transparent', border: '1px solid #e05', color: '#e05' }} disabled={isPending} onClick={() => { setNoteOpen(true); adminReview('FLAGGED') }}><Flag size={13} /> Flag</button>}
         {!isAdmin && t.flagStatus !== 'FLAGGED' && <button className="admin-wide-button" style={{ background: 'transparent', border: '1px solid #e05', color: '#e05' }} disabled={isPending} onClick={() => setFlagOpen(true)}><Flag size={13} /> Flag</button>}
         {!isAdmin && flagOpen && <button className="action-button" disabled={flagPending} onClick={() => agentFlag()}>{flagPending ? 'Flagging...' : 'Confirm flag'}</button>}
         {!isAdmin && t.flagStatus === 'FLAGGED' && <button className="action-button" disabled={isPending} onClick={() => agentReview()}>{reviewPending ? 'Saving...' : <><Check size={13} /> Mark reviewed</>}</button>}
-        {canEditTransaction && <button className="quiet-button" onClick={openEdit}>Edit</button>}
+        {canEditTransaction && <><button className="quiet-button" onClick={openEdit}>Edit</button><button className="quiet-button" onClick={() => void deleteRecord}>Delete</button></>}
         {isAdmin && !noteOpen && <button className="quiet-button" onClick={() => setNoteOpen((v) => !v)}>Add note</button>}
       </div>
     </> }
@@ -1132,14 +1145,15 @@ function PersonExpandable({ person }: { person: api.PersonSummary & { nationalId
   </div>
 }
 
-function DetailsScreen({ record, role, currentUserId, onEditRegistration }: { record: BicycleRecord; role: Role; currentUserId: string | null; onEditRegistration: (id: string, draft: RegistrationDraft) => void }) {
+function DetailsScreen({ record, role, onEditRegistration, onOpenTransaction }: { record: BicycleRecord; role: Role; onEditRegistration: (id: string, draft: RegistrationDraft) => void; onOpenTransaction: (id: string) => void }) {
   const { data: bikeData, isLoading } = useQuery({ queryKey: ['bicycle', record.id], queryFn: () => api.getBicycle(record.id) })
   const { data: txData } = useQuery({ queryKey: ['transactions', record.frameNumber], queryFn: () => api.listTransactions({ q: record.frameNumber }), enabled: !!record.id })
   const { data: regData } = useQuery({ queryKey: ['registrations', record.id], queryFn: () => api.listRegistrations({ bicycleId: record.id }), enabled: !!record.id })
   const bike = bikeData?.data
   const lastTx = txData?.data?.[0]
   const registration = regData?.data?.[0]
-  const canEditReg = registration && (role === 'ADMIN' || (role === 'AGENT' && registration.recordingAgent.id === currentUserId))
+  const canEditReg = registration && (role === 'ADMIN' || role === 'AGENT')
+  const canEditTransaction = lastTx && (role === 'ADMIN' || role === 'AGENT')
   const openEditReg = () => {
     if (!registration) return
     const draft: RegistrationDraft = {
@@ -1167,6 +1181,7 @@ function DetailsScreen({ record, role, currentUserId, onEditRegistration }: { re
       {canEditReg && <button className="quiet-button" style={{ marginTop: 8 }} onClick={openEditReg}>Edit registration</button>}
     </div></> }
     {lastTx && registration && canEditReg && <button className="quiet-button" style={{ marginTop: 8 }} onClick={openEditReg}>Edit registration</button>}
+    {canEditTransaction && <button className="quiet-button" style={{ marginTop: 8 }} onClick={() => onOpenTransaction(lastTx.id)}>Edit transaction</button>}
     <div className="location-card"><MapPin size={17} /><span><small>Status</small><strong>{bike?.status ?? '—'}</strong></span></div>
     <button className="action-button export-button" onClick={() => {
       const w = window.open('', '_blank')

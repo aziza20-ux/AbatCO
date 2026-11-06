@@ -5,5 +5,7 @@ import { registrationHandlers } from '../controllers/registrationsController.js'
 export const registrationsRouter = Router()
 registrationsRouter.use(requireAuth)
 registrationsRouter.get('/', registrationHandlers.listRegistrations)
+registrationsRouter.get('/:id', registrationHandlers.getRegistration)
 registrationsRouter.post('/', registrationHandlers.createRegistration)
 registrationsRouter.patch('/:id', registrationHandlers.updateRegistration)
+registrationsRouter.delete('/:id', registrationHandlers.deleteRegistration)

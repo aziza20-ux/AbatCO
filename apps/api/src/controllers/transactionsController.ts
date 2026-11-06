@@ -85,7 +85,7 @@ const editInput = z.object({
 
 export async function editTransaction(request: AuthRequest, response: Response) {
   const inputData = editInput.parse(request.body)
-  const where: Prisma.TransactionWhereInput = { OR: [{ id: String(request.params.id) }, { transactionId: String(request.params.id) }], ...(request.user!.role === 'AGENT' ? { recordingAgentId: request.user!.id } : {}) }
+  const where: Prisma.TransactionWhereInput = { OR: [{ id: String(request.params.id) }, { transactionId: String(request.params.id) }] }
   const existing = await prisma.transaction.findFirst({ where, select: { id: true, bicycleId: true, sellerId: true, buyerId: true } })
   if (!existing) return response.status(404).json({ error: { code: 'NOT_FOUND', message: 'Transaction not found' } })
   const updated = await prisma.$transaction(async (tx) => {
@@ -114,6 +114,22 @@ export async function editTransaction(request: AuthRequest, response: Response) 
   })
   await audit(request.user!.id, 'TRANSACTION_UPDATED', 'Transaction', updated.id, { transactionId: updated.transactionId, fields: Object.keys(inputData) })
   return response.json({ data: updated })
+}
+
+export async function deleteTransaction(request: AuthRequest, response: Response) {
+  const transaction = await prisma.transaction.findFirst({
+    where: { OR: [{ id: String(request.params.id) }, { transactionId: String(request.params.id) }] },
+    select: { id: true, bicycleId: true, sellerId: true, ownershipStatus: true, transactionId: true },
+  })
+  if (!transaction) return response.status(404).json({ error: { code: 'NOT_FOUND', message: 'Transaction not found' } })
+  await prisma.$transaction(async (tx) => {
+    if (transaction.ownershipStatus === 'ACTIVE') {
+      await tx.bicycle.update({ where: { id: transaction.bicycleId }, data: { currentOwnerId: transaction.sellerId } })
+    }
+    await tx.transaction.delete({ where: { id: transaction.id } })
+  })
+  await audit(request.user!.id, 'TRANSACTION_DELETED', 'Transaction', transaction.id, { transactionId: transaction.transactionId })
+  return response.status(204).send()
 }
 
 export async function createTransaction(request: AuthRequest, response: Response) {
