@@ -13,8 +13,16 @@ export async function updateRegistration(request: AuthRequest, response: Respons
   const registration = await prisma.registration.findUnique({ where: { id: String(request.params.id) } })
   if (!registration) return response.status(404).json({ error: { code: 'NOT_FOUND', message: 'Registration not found' } })
   if (request.user!.role === 'AGENT' && registration.recordingAgentId !== request.user!.id) return response.status(403).json({ error: { code: 'FORBIDDEN', message: 'You can only edit your own registrations' } })
-  const updated = await prisma.registration.update({ where: { id: registration.id }, data: { ...(input.bicycleId ? { bicycleId: input.bicycleId } : {}), ...(input.ownerId ? { ownerId: input.ownerId } : {}) }, include: { bicycle: { select: { id: true, frameNumber: true, brand: true, model: true } }, owner: { select: { id: true, name: true, nationalId: true, phone: true, cell: true, sector: true, village: true, nationalIdPhotoUrl: true } }, recordingAgent: { select: { id: true, name: true } } } })
-  if (input.ownerId) await prisma.bicycle.update({ where: { id: updated.bicycleId }, data: { currentOwnerId: input.ownerId } })
+  const updated = await prisma.$transaction(async (tx) => {
+    const bicycleId = input.bicycleId ?? registration.bicycleId
+    const ownerId = input.ownerId ?? registration.ownerId
+    if (input.bicycleId && input.bicycleId !== registration.bicycleId && registration.ownerId) {
+      await tx.bicycle.updateMany({ where: { id: registration.bicycleId, currentOwnerId: registration.ownerId }, data: { currentOwnerId: null } })
+    }
+    const result = await tx.registration.update({ where: { id: registration.id }, data: { bicycleId, ownerId }, include: { bicycle: { select: { id: true, frameNumber: true, brand: true, model: true } }, owner: { select: { id: true, name: true, nationalId: true, phone: true, cell: true, sector: true, village: true, nationalIdPhotoUrl: true } }, recordingAgent: { select: { id: true, name: true } } } })
+    if (input.bicycleId || input.ownerId) await tx.bicycle.update({ where: { id: bicycleId }, data: { currentOwnerId: ownerId } })
+    return result
+  })
   await audit(request.user!.id, 'REGISTRATION_UPDATED', 'Registration', updated.id, { fields: Object.keys(input) })
   return response.json({ data: updated })
 }

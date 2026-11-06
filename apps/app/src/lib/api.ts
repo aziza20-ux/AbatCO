@@ -120,14 +120,14 @@ export async function upsertBicycleByFrameNumber(data: { frameNumber: string; br
   return (await createBicycle(data)).data
 }
 
-export async function updateBicycle(id: string, data: { brand?: string; model?: string; color?: string; distinguishingFeatures?: string; status?: string; currentOwnerId?: string }) {
+export async function updateBicycle(id: string, data: { frameNumber?: string; brand?: string; model?: string; color?: string; distinguishingFeatures?: string; status?: string; currentOwnerId?: string }) {
   return apiRequest<ApiEnvelope<Bicycle>>(`/bicycles/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
 }
 
 // ── Transactions ──────────────────────────────────────────────────────────────
 
 export type PersonSummary = { id: string; name: string; nationalId?: string; phone?: string; cell?: string; sector?: string; village?: string; nationalIdPhotoUrl?: string }
-export type Transaction = { id: string; transactionId: string; type: 'SALE' | 'TRANSFER'; price?: number; serviceFee?: number; reason?: string; location?: string; transactionDate: string; flagStatus: string; flagReason?: string; agentNote?: string; adminReviewNotes?: string; ownershipStatus: 'ACTIVE' | 'HISTORICAL'; bicycle: { id: string; frameNumber: string; brand?: string; model?: string }; seller?: PersonSummary; buyer?: PersonSummary; recordingAgent: { id: string; name: string } }
+export type Transaction = { id: string; transactionId: string; type: 'SALE' | 'TRANSFER'; price?: number; serviceFee?: number; reason?: string; location?: string; transactionDate: string; flagStatus: string; flagReason?: string; agentNote?: string; adminReviewNotes?: string; ownershipStatus: 'ACTIVE' | 'HISTORICAL'; bicycle: { id: string; frameNumber: string; brand?: string; model?: string; color?: string; distinguishingFeatures?: string }; seller?: PersonSummary; buyer?: PersonSummary; recordingAgent: { id: string; name: string } }
 
 export async function listTransactions(params?: { q?: string; flagStatus?: string; type?: string; agentId?: string; personId?: string; page?: number }) {
   const search = new URLSearchParams({ page: String(params?.page ?? 1), limit: '5', ...(params?.q ? { q: params.q } : {}), ...(params?.flagStatus ? { flagStatus: params.flagStatus } : {}), ...(params?.type ? { type: params.type } : {}), ...(params?.agentId ? { agentId: params.agentId } : {}), ...(params?.personId ? { personId: params.personId } : {}) })
@@ -142,9 +142,11 @@ export async function createTransaction(data: object, clientOperationId: string)
   return apiRequest<ApiEnvelope<Transaction>>('/transactions', { method: 'POST', body: JSON.stringify(data), headers: { 'x-client-operation-id': clientOperationId } })
 }
 
-export async function editTransaction(id: string, data: object) {
+export async function editTransaction(id: string, data: { price?: number; serviceFee?: number; reason?: string | null; location?: string | null; bicycle: { id: string; frameNumber: string; brand?: string | null; model?: string | null; color?: string | null; distinguishingFeatures?: string | null }; seller: PersonEdit | null; buyer: PersonEdit | null }) {
   return apiRequest<ApiEnvelope<Transaction>>(`/transactions/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
 }
+
+type PersonEdit = { id: string; name: string; nationalId: string; phone?: string | null; cell?: string | null; sector?: string | null; village?: string | null; nationalIdPhotoUrl?: string | null }
 
 export async function flagTransaction(id: string, flagReason?: string) {
   return apiRequest<ApiEnvelope<Transaction>>(`/transactions/${id}/flag`, { method: 'PATCH', body: JSON.stringify({ flagReason }) })
