@@ -2,6 +2,14 @@ const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:4000/api'
 
 type ApiEnvelope<T> = { data: T }
 
+export function generateSerialNumber(): string {
+  const randomValues = new Uint32Array(1)
+  crypto.getRandomValues(randomValues)
+  const digits = String(randomValues[0] % 100000).padStart(5, '0')
+  const letter = String.fromCharCode(65 + (randomValues[0] % 26))
+  return `SMN-${digits}-${letter}`
+}
+
 export class ApiError extends Error {
   constructor(public readonly status: number, message: string, public readonly retryAfterSeconds?: number, public readonly code?: string) {
     super(message)

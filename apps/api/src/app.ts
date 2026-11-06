@@ -41,6 +41,11 @@ const errorHandler: ErrorRequestHandler = (error, _request, response, _next) => 
     const issue = error.issues[0]
     return response.status(400).json({ error: { code: 'VALIDATION_ERROR', message: issue ? `${issue.path.join('.') || 'Request'}: ${issue.message}` : 'Invalid request', details: error.issues } })
   }
+  if (error?.code === 'P2002') {
+    const target = Array.isArray(error.meta?.target) ? error.meta.target : []
+    const message = target.includes('frameNumber') ? 'A bicycle with this serial number already exists.' : 'A record with these unique values already exists.'
+    return response.status(409).json({ error: { code: 'DUPLICATE_RECORD', message } })
+  }
   console.error(error instanceof Error ? error.message : 'Unhandled API error')
   const status = typeof error?.status === 'number' && error.status >= 400 && error.status < 600 ? error.status : 500
   response.status(status).json({ error: { code: error?.code ?? 'INTERNAL_ERROR', message: status === 500 ? 'Internal server error' : error.message } })
