@@ -249,20 +249,32 @@ function Login({ onLogin, onForgot }: { onLogin: (user: { id: string; name: stri
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [retrySeconds, setRetrySeconds] = useState<number | null>(null)
   const [showPassword, setShowPassword] = useState(false)
+  useEffect(() => {
+    if (retrySeconds === null || retrySeconds <= 0) return
+    const timer = window.setInterval(() => setRetrySeconds((seconds) => seconds === null ? null : Math.max(0, seconds - 1)), 1000)
+    return () => window.clearInterval(timer)
+  }, [retrySeconds])
   const submit = async () => {
     if (!email || !password) return
-    setLoading(true); setError(null)
+    setLoading(true); setError(null); setRetrySeconds(null)
     try { const result = await api.login(email, password); onLogin(result.user) }
-    catch (error) { setError(userFacingError(error, 'Invalid credentials')) }
+    catch (error) {
+      setError(userFacingError(error, 'Invalid credentials'))
+      setRetrySeconds(error instanceof api.ApiError && error.status === 429 && error.retryAfterSeconds !== undefined ? Math.ceil(error.retryAfterSeconds) : null)
+    }
     finally { setLoading(false) }
   }
+  const displayedError = retrySeconds !== null
+    ? retrySeconds > 0 ? `Too many requests. Please try again in ${api.formatRetryDuration(retrySeconds)}.` : 'Too many requests. You can try again now.'
+    : error
   return <main className="login-screen">
     <div className="login-hero"><div className="hero-bike"><img src="/icons/icon-192.png" alt="AbatCO" /></div><strong>CycleTrack</strong><small></small></div>
     <section className="login-panel"><p className="screen-kicker">SECURE ENTRY</p><p className="login-copy">Authorized personnel only.</p>
       <label><span><Smartphone size={12} /> Email <b className="required-mark">*</b></span><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@example.com" /></label>
       <label><span><LockKeyhole size={12} /> Password <b className="required-mark">*</b></span><div className="password-input"><input type={showPassword ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} /><Eye size={15} style={{ cursor: 'pointer', flexShrink: 0 }} onClick={() => setShowPassword((v) => !v)} /></div></label>
-      {error && <p className="error-text" style={{color:'#e05'}}>{error}</p>}
+      {displayedError && <p className="error-text" style={{color:'#e05'}}>{displayedError}</p>}
       <button className="action-button" disabled={loading || !email || !password} onClick={() => void submit()}>{loading ? 'Signing in...' : 'Login'} <ArrowRight size={16} /></button>
       <button className="quiet-button" style={{ marginTop: 12 }} onClick={onForgot}>Forgot password?</button>
     </section>
@@ -1259,7 +1271,7 @@ function ProfileScreen({ user, role, fontSize, onChangeFontSize, onLogout, secti
   }
   // Sync
   const [syncing, setSyncing] = useState(false)
-  const [syncResult, setSyncResult] = useState<string | null>(null)
+  const [syncResult, setSyncResult] = useState<{ message: string; isError: boolean } | null>(null)
   const [pendingCount, setPendingCount] = useState<number | null>(null)
   useEffect(() => {
     if (section !== 'sync') return
@@ -1273,9 +1285,10 @@ function ProfileScreen({ user, role, fontSize, onChangeFontSize, onLogout, secti
     try {
       const { flushPendingOperations } = await import('./lib/sync')
       const s = await flushPendingOperations()
-      setSyncResult(`Synced ${s.synced} · Conflicts ${s.conflicts} · Errors ${s.failed + s.validationErrors}`)
+      const errorCount = s.failed + s.validationErrors
+      setSyncResult({ message: `Synced ${s.synced} · Conflicts ${s.conflicts} · Errors ${errorCount}`, isError: errorCount > 0 || s.conflicts > 0 })
       setPendingCount(0)
-    } catch { setSyncResult('Sync failed. Check connectivity.') }
+    } catch { setSyncResult({ message: 'Sync failed. Check connectivity.', isError: true }) }
     finally { setSyncing(false) }
   }
   // Clear cache
@@ -1309,7 +1322,7 @@ function ProfileScreen({ user, role, fontSize, onChangeFontSize, onLogout, secti
     <button className="quiet-button" style={{ marginBottom: 12 }} onClick={backToSettings}>← Back to settings</button>
     <p style={{ margin: '8px 0 4px', fontSize: 13 }}>Pending operations: <strong>{pendingCount ?? '…'}</strong></p>
     <p style={{ fontSize: 12, color: '#7f8d87', marginBottom: 12 }}>Operations queued offline that haven't synced yet.</p>
-    {syncResult && <p style={{ fontSize: 13, margin: '4px 0 8px', color: '#4caf7d' }}>{syncResult}</p>}
+    {syncResult && <p className={syncResult.isError ? 'error-text' : undefined} style={{ fontSize: 13, margin: '4px 0 8px', color: syncResult.isError ? undefined : '#4caf7d' }}>{syncResult.message}</p>}
     <button className="action-button" disabled={syncing || !navigator.onLine} onClick={() => void forceSync()}>{syncing ? 'Syncing...' : 'Sync now'}</button>
     {!navigator.onLine && <p style={{ fontSize: 12, color: '#e05', marginTop: 6 }}>You are offline.</p>}
     <SyncErrorList />

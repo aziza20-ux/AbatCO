@@ -9,10 +9,20 @@ export class ApiError extends Error {
   }
 }
 
+export function formatRetryDuration(seconds: number): string {
+  const total = Math.max(0, Math.ceil(seconds))
+  if (total < 60) return `${total} second${total === 1 ? '' : 's'}`
+  const minutes = Math.floor(total / 60)
+  const remaining = total % 60
+  if (!remaining) return `${minutes} minute${minutes === 1 ? '' : 's'}`
+  return `${minutes} minute${minutes === 1 ? '' : 's'} and ${remaining} second${remaining === 1 ? '' : 's'}`
+}
+
 function retryAfterSeconds(response: Response, body: unknown): number | undefined {
   const header = response.headers.get('Retry-After')
   const bodyRecord = body && typeof body === 'object' ? body as Record<string, unknown> : null
-  const bodyValue = bodyRecord?.retryAfter ?? bodyRecord?.retryAfterSeconds ?? (bodyRecord?.error && typeof bodyRecord.error === 'object' ? (bodyRecord.error as Record<string, unknown>).retryAfter : undefined)
+  const errorRecord = bodyRecord?.error && typeof bodyRecord.error === 'object' ? bodyRecord.error as Record<string, unknown> : null
+  const bodyValue = bodyRecord?.retryAfter ?? bodyRecord?.retryAfterSeconds ?? errorRecord?.retryAfter ?? errorRecord?.retryAfterSeconds
   const value = header ?? (typeof bodyValue === 'number' || typeof bodyValue === 'string' ? bodyValue : undefined)
   if (value === undefined) return undefined
   const seconds = typeof value === 'number' ? value : /^\d+$/.test(value) ? Number(value) : Math.ceil((Date.parse(value) - Date.now()) / 1000)
@@ -23,7 +33,7 @@ export function userFacingError(error: unknown, fallback = 'Something went wrong
   if (error instanceof ApiError) {
     if (error.status === 429) {
       const seconds = error.retryAfterSeconds ?? Number(error.message.match(/(\d+)\s*seconds?/i)?.[1])
-      return Number.isFinite(seconds) ? `Too many attempts. Please try again in ${Math.max(0, seconds!)} seconds.` : 'Too many attempts. Please try again later.'
+      return Number.isFinite(seconds) ? `Too many requests. Please try again in ${formatRetryDuration(seconds!)}.` : 'Too many requests. Please try again later.'
     }
     if (error.status === 401) return 'Your session has expired. Please sign in again.'
     if (error.status === 403) return 'You are not authorized to perform this action.'
