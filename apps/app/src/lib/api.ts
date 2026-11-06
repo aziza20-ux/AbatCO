@@ -2,6 +2,40 @@ const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:4000/api'
 
 type ApiEnvelope<T> = { data: T }
 
+export class ApiError extends Error {
+  constructor(public readonly status: number, message: string, public readonly retryAfterSeconds?: number, public readonly code?: string) {
+    super(message)
+    this.name = 'ApiError'
+  }
+}
+
+function retryAfterSeconds(response: Response, body: unknown): number | undefined {
+  const header = response.headers.get('Retry-After')
+  const bodyRecord = body && typeof body === 'object' ? body as Record<string, unknown> : null
+  const bodyValue = bodyRecord?.retryAfter ?? bodyRecord?.retryAfterSeconds ?? (bodyRecord?.error && typeof bodyRecord.error === 'object' ? (bodyRecord.error as Record<string, unknown>).retryAfter : undefined)
+  const value = header ?? (typeof bodyValue === 'number' || typeof bodyValue === 'string' ? bodyValue : undefined)
+  if (value === undefined) return undefined
+  const seconds = typeof value === 'number' ? value : /^\d+$/.test(value) ? Number(value) : Math.ceil((Date.parse(value) - Date.now()) / 1000)
+  return Number.isFinite(seconds) ? Math.max(0, seconds) : undefined
+}
+
+export function userFacingError(error: unknown, fallback = 'Something went wrong. Please try again.') {
+  if (error instanceof ApiError) {
+    if (error.status === 429) {
+      const seconds = error.retryAfterSeconds ?? Number(error.message.match(/(\d+)\s*seconds?/i)?.[1])
+      return Number.isFinite(seconds) ? `Too many attempts. Please try again in ${Math.max(0, seconds!)} seconds.` : 'Too many attempts. Please try again later.'
+    }
+    if (error.status === 401) return 'Your session has expired. Please sign in again.'
+    if (error.status === 403) return 'You are not authorized to perform this action.'
+    if (error.status === 404) return 'The requested record was not found.'
+    if (error.status === 409) return error.message || 'This operation conflicts with a newer change.'
+    if (error.status >= 500) return 'The server is temporarily unavailable. Please try again later.'
+    return error.message || fallback
+  }
+  if (error instanceof TypeError || (error && typeof error === 'object' && 'isNetworkError' in error)) return 'Network unavailable. Your changes remain local and will sync when connection returns.'
+  return fallback
+}
+
 let refreshPromise: Promise<void> | null = null
 
 async function silentRefresh(): Promise<void> {
@@ -10,7 +44,7 @@ async function silentRefresh(): Promise<void> {
   let result: Response
   try {
     result = await fetch(`${API_URL}/auth/refresh`, { method: 'POST', credentials: 'include', signal: controller.signal })
-  } catch (err) {
+  } catch {
     // Network failure or timeout — do NOT clear the token
     throw Object.assign(new Error('Network error during refresh'), { isNetworkError: true })
   } finally {
@@ -34,9 +68,14 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}, ret
     await refreshPromise
     return apiRequest<T>(path, options, false)
   }
-  if (!response.ok) throw new Error((await response.json().catch(() => null))?.error?.message ?? (await response.json().catch(() => null))?.error ?? 'Request failed')
   if (response.status === 204) return undefined as T
-  return response.json() as Promise<T>
+  const body = await response.json().catch(() => null) as { error?: { code?: string; message?: string } | string } | null
+  if (!response.ok) {
+    const errorValue = body?.error
+    const message = typeof errorValue === 'string' ? errorValue : errorValue?.message
+    throw new ApiError(response.status, message ?? 'Request failed', retryAfterSeconds(response, body), typeof errorValue === 'object' ? errorValue?.code : undefined)
+  }
+  return body as T
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────

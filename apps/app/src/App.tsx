@@ -4,6 +4,7 @@ import { Activity, ArrowLeft, ArrowRight, Bike, CalendarDays, Camera, Check, Che
 import { type BicycleRecord, type PersonRecord, mockUser } from './mock/data'
 import { db } from './lib/db'
 import * as api from './lib/api'
+import { userFacingError } from './lib/api'
 import { startSyncWorker } from './lib/sync'
 
 type Screen = 'login' | 'forgot-password' | 'reset-password' | 'home' | 'admin-home' | 'admin-transactions' | 'transaction-record' | 'flagged-queue' | 'bicycle-inventory' | 'ownership-chain' | 'registry-profile' | 'agent-management' | 'agent-onboarding' | 'agent-terminal' | 'reports-exports' | 'transaction' | 'register' | 'search' | 'details' | 'activity' | 'profile' | 'people' | 'person-activity'
@@ -179,13 +180,13 @@ function ForgotPasswordScreen({ onBack, onNext }: { onBack: () => void; onNext: 
   const submit = async () => {
     setBusy(true); setError(null)
     try { await api.forgotPassword(email); onNext(email) }
-    catch { setError('Something went wrong. Try again.') }
+    catch (error) { setError(userFacingError(error, 'Something went wrong. Try again.')) }
     finally { setBusy(false) }
   }
   return <main className="login-screen">
     <div className="login-hero"><div className="hero-bike"><img src="/icons/icon-192.png" alt="AbatCO" /></div><strong>CycleTrack</strong><small></small></div>
     <section className="login-panel"><p className="screen-kicker">RESET PASSWORD</p><p className="login-copy">Enter your account email. A 6-digit code will be sent to you.</p>
-      <label><span><Smartphone size={12} /> Email</span><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="agent@example.com" /></label>
+      <label><span><Smartphone size={12} /> Email <b className="required-mark">*</b></span><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="agent@example.com" /></label>
       {error && <p style={{ color: '#e05', fontSize: 13 }}>{error}</p>}
       <button className="action-button" disabled={busy || !email} onClick={() => void submit()}>{busy ? 'Sending...' : 'Send code'} <ArrowRight size={16} /></button>
       <button className="quiet-button" style={{ marginTop: 12 }} onClick={onBack}>Back to login</button>
@@ -210,10 +211,7 @@ function ResetPasswordScreen({ email, onBack, onDone }: { email: string; onBack:
   const resend = async () => {
     setResending(true); setError(null)
     try { await api.forgotPassword(email); setResendCooldown(30) }
-    catch (err: unknown) {
-      const msg = (err as { message?: string })?.message ?? ''
-      setError(msg.includes('30') ? 'Please wait 30 seconds before resending.' : 'Failed to resend code. Try again.')
-    }
+    catch (error) { setError(userFacingError(error, 'Failed to resend code. Try again.')) }
     finally { setResending(false) }
   }
   const submit = async () => {
@@ -221,7 +219,7 @@ function ResetPasswordScreen({ email, onBack, onDone }: { email: string; onBack:
     if (newPassword.length < 12) { setError('Password must be at least 12 characters'); return }
     setBusy(true); setError(null)
     try { await api.resetPassword(email, otp, newPassword); setDone(true) }
-    catch { setError('Invalid or expired code') }
+    catch (error) { setError(userFacingError(error, 'Invalid or expired code')) }
     finally { setBusy(false) }
   }
   return <main className="login-screen">
@@ -232,9 +230,9 @@ function ResetPasswordScreen({ email, onBack, onDone }: { email: string; onBack:
         <button className="action-button" onClick={onDone}>Back to login <ArrowRight size={16} /></button>
       </> : <>
         <p className="login-copy">Enter the 6-digit code sent to <strong>{email}</strong> and your new password.</p>
-        <label><span><LockKeyhole size={12} /> Code</span><input value={otp} onChange={(e) => setOtp(e.target.value)} maxLength={6} placeholder="000000" /></label>
-        <label><span><LockKeyhole size={12} /> New password (min 12)</span><input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} /></label>
-        <label><span><LockKeyhole size={12} /> Confirm password</span><input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} /></label>
+        <label><span><LockKeyhole size={12} /> Code <b className="required-mark">*</b></span><input value={otp} onChange={(e) => setOtp(e.target.value)} maxLength={6} placeholder="000000" /></label>
+        <label><span><LockKeyhole size={12} /> New password (min 12) <b className="required-mark">*</b></span><input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} /></label>
+        <label><span><LockKeyhole size={12} /> Confirm password <b className="required-mark">*</b></span><input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} /></label>
         {error && <p style={{ color: '#e05', fontSize: 13 }}>{error}</p>}
         <button className="action-button" disabled={busy || !otp || !newPassword || !confirm} onClick={() => void submit()}>{busy ? 'Resetting...' : 'Reset password'} <ArrowRight size={16} /></button>
         <button className="quiet-button" style={{ marginTop: 8 }} disabled={resendCooldown > 0 || resending} onClick={() => void resend()}>
@@ -256,14 +254,14 @@ function Login({ onLogin, onForgot }: { onLogin: (user: { id: string; name: stri
     if (!email || !password) return
     setLoading(true); setError(null)
     try { const result = await api.login(email, password); onLogin(result.user) }
-    catch { setError('Invalid credentials') }
+    catch (error) { setError(userFacingError(error, 'Invalid credentials')) }
     finally { setLoading(false) }
   }
   return <main className="login-screen">
     <div className="login-hero"><div className="hero-bike"><img src="/icons/icon-192.png" alt="AbatCO" /></div><strong>CycleTrack</strong><small></small></div>
     <section className="login-panel"><p className="screen-kicker">SECURE ENTRY</p><p className="login-copy">Authorized personnel only.</p>
-      <label><span><Smartphone size={12} /> Email</span><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@example.com" /></label>
-      <label><span><LockKeyhole size={12} /> Password</span><div className="password-input"><input type={showPassword ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} /><Eye size={15} style={{ cursor: 'pointer', flexShrink: 0 }} onClick={() => setShowPassword((v) => !v)} /></div></label>
+      <label><span><Smartphone size={12} /> Email <b className="required-mark">*</b></span><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@example.com" /></label>
+      <label><span><LockKeyhole size={12} /> Password <b className="required-mark">*</b></span><div className="password-input"><input type={showPassword ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} /><Eye size={15} style={{ cursor: 'pointer', flexShrink: 0 }} onClick={() => setShowPassword((v) => !v)} /></div></label>
       {error && <p className="error-text" style={{color:'#e05'}}>{error}</p>}
       <button className="action-button" disabled={loading || !email || !password} onClick={() => void submit()}>{loading ? 'Signing in...' : 'Login'} <ArrowRight size={16} /></button>
       <button className="quiet-button" style={{ marginTop: 12 }} onClick={onForgot}>Forgot password?</button>
@@ -598,10 +596,10 @@ function AgentOnboardingScreen({ onNavigate, editAgent }: { onNavigate: (screen:
   }
   const ready = form.name.trim() && form.email.trim() && (isEdit || form.password.length >= 12)
   return <AdminPanel title={isEdit ? 'Edit Agent' : 'Agent Onboarding'} kicker={isEdit ? 'EDIT FIELD AGENT' : 'NEW FIELD AGENT'}>
-    <label>Full legal name<input value={form.name} onChange={(e) => update('name', e.target.value)} placeholder="e.g. Marcus Thorne" /></label>
-    <label>Official email<input type="email" value={form.email} onChange={(e) => update('email', e.target.value)} placeholder="agent@biketrack.gov" /></label>
-    <label>Phone number<input type="tel" value={form.phone} onChange={(e) => update('phone', e.target.value)} placeholder="+233 24 000 0000" /></label>
-    {!isEdit && <label>Password (min 12 chars)<input type="password" value={form.password} onChange={(e) => update('password', e.target.value)} /></label>}
+    <label><span>Full legal name <b className="required-mark">*</b></span><input value={form.name} onChange={(e) => update('name', e.target.value)} placeholder="e.g. Marcus Thorne" /></label>
+    <label><span>Official email <b className="required-mark">*</b></span><input type="email" value={form.email} onChange={(e) => update('email', e.target.value)} placeholder="agent@biketrack.gov" /></label>
+    <label><span>Phone number <em className="optional-mark">(optional)</em></span><input type="tel" value={form.phone} onChange={(e) => update('phone', e.target.value)} placeholder="+233 24 000 0000" /></label>
+    {!isEdit && <label><span>Password (min 12 chars) <b className="required-mark">*</b></span><input type="password" value={form.password} onChange={(e) => update('password', e.target.value)} /></label>}
     {error && <p className="error-text" style={{ color: '#e05' }}>{error}</p>}
     <button className="admin-wide-button" disabled={!ready || saving} onClick={() => void submit()}>{saving ? (isEdit ? 'Saving...' : 'Creating...') : (isEdit ? 'Save changes' : 'Create agent credentials')} <ArrowRight size={14} /></button>
   </AdminPanel>
@@ -778,7 +776,7 @@ function TransactionFlow({ step, setStep, saved, onSave, onCancel, onViewOwner, 
         await queryClient.invalidateQueries({ queryKey: ['transactions'] })
         await queryClient.invalidateQueries({ queryKey: ['bicycle', draft.bicycleId] })
         await queryClient.invalidateQueries({ queryKey: ['bicycles'] })
-      } catch { setSaveError('Could not save transaction changes. Check your connection and permissions.'); setIsSaving(false); return }
+      } catch (error) { setSaveError(userFacingError(error, 'Could not save transaction changes.')); setIsSaving(false); return }
       setIsSaving(false); onSave(); return
     }
     const clientOperationId = crypto.randomUUID()
@@ -821,6 +819,8 @@ function TransactionFlow({ step, setStep, saved, onSave, onCancel, onViewOwner, 
         const buyerOk = draft.buyerNationalId.length === 16 && draft.buyerName.trim() && draft.buyerPhone.length >= 10
         if (!sellerOk || !buyerOk) { setPartySubmitted(true); return }
       }
+      const sellerMismatch = Boolean(serialOwner?.nationalId && draft.sellerNationalId.trim() && serialOwner.nationalId !== draft.sellerNationalId.trim())
+      if (sellerMismatch && !draft.reason.trim()) { setPartySubmitted(true); return }
       setStep(4); return
     }
     if (step === 4) void saveTransaction()
@@ -840,11 +840,11 @@ function ChoiceStep({ type, onTypeChange }: { type: TransactionDraft['type']; on
 function SerialStep({ value, onChange, checked, found, owner, confirmed, onVerify, onConfirm, onUse, onViewOwner }: { value: string; onChange: (value: string) => void; checked: boolean; found: boolean; owner: PersonRecord | null; confirmed: boolean; onVerify: () => void; onConfirm: () => void; onUse: () => void; onViewOwner: (person: PersonRecord) => void }) {
   const [verifying, setVerifying] = useState(false)
   const handleVerify = () => { setVerifying(true); Promise.resolve(onVerify()).finally(() => setVerifying(false)) }
-  return <div className="flow-body"><h2>Verify serial number</h2><p>Check the local database before creating a bicycle record.</p><label>Frame serial number<div className="serial-input"><QrCode size={16} /><input value={value} onChange={(event) => onChange(event.target.value)} placeholder="E.G. AB12345678" /><Smartphone size={16} /></div></label><button className="secondary-button" disabled={verifying} onClick={handleVerify}><Search size={15} /> {verifying ? 'Verifying...' : 'Verify database'}</button>{checked && found && <div className="duplicate-warning"><ShieldAlert size={17} /><span><strong>Duplicate bicycle found</strong><small>This serial is already linked to an owner. Resolve the issue before continuing.</small>{owner && <><button className="owner-details-link" onClick={() => onViewOwner(owner)}>View owner details <ArrowRight size={12} /></button><div className="owner-details"><b>{owner.name}</b><small>{owner.nationalId} · {owner.phone}</small><small>{owner.sector} · {owner.village}</small></div></>}</span><div className="duplicate-actions">{confirmed ? <Check className="confirmation-check" size={17} /> : <button className="confirm-warning" onClick={onConfirm}>Issue resolved</button>}<button className="use-bicycle-btn" onClick={onUse}>Use this bicycle <ArrowRight size={12} /></button></div></div>}{checked && !found && <div className="verification-result not-found"><Check size={15} /><span><strong>Serial available</strong><small>No bicycle record was found. Continue to capture the bicycle.</small></span></div>}<p className="section-label">Common serial locations</p><div className="location-grid"><span>Bottom bracket<b>Under pedals</b></span><span>Head tube<b>Front of frame</b></span><span>Seat tube<b>Near saddle</b></span><span>Rear dropout<b>Back wheel hub</b></span></div></div> }
+  return <div className="flow-body"><h2>Verify serial number</h2><p>Check the local database before creating a bicycle record.</p><label><span>Frame serial number <b className="required-mark">*</b></span><div className="serial-input"><QrCode size={16} /><input value={value} onChange={(event) => onChange(event.target.value)} placeholder="E.G. AB12345678" /><Smartphone size={16} /></div></label><button className="secondary-button" disabled={verifying} onClick={handleVerify}><Search size={15} /> {verifying ? 'Verifying...' : 'Verify database'}</button>{checked && found && <div className="duplicate-warning"><ShieldAlert size={17} /><span><strong>Duplicate bicycle found</strong><small>This serial is already linked to an owner. Resolve the issue before continuing.</small>{owner && <><button className="owner-details-link" onClick={() => onViewOwner(owner)}>View owner details <ArrowRight size={12} /></button><div className="owner-details"><b>{owner.name}</b><small>{owner.nationalId} · {owner.phone}</small><small>{owner.sector} · {owner.village}</small></div></>}</span><div className="duplicate-actions">{confirmed ? <Check className="confirmation-check" size={17} /> : <button className="confirm-warning" onClick={onConfirm}>Issue resolved</button>}<button className="use-bicycle-btn" onClick={onUse}>Use this bicycle <ArrowRight size={12} /></button></div></div>}{checked && !found && <div className="verification-result not-found"><Check size={15} /><span><strong>Serial available</strong><small>No bicycle record was found. Continue to capture the bicycle.</small></span></div>}<p className="section-label">Common serial locations</p><div className="location-grid"><span>Bottom bracket<b>Under pedals</b></span><span>Head tube<b>Front of frame</b></span><span>Seat tube<b>Near saddle</b></span><span>Rear dropout<b>Back wheel hub</b></span></div></div> }
 function BicycleCaptureStep({ draft, update, editable }: { draft: TransactionDraft; update: <K extends keyof TransactionDraft>(key: K, value: TransactionDraft[K]) => void; editable?: boolean }) {
   const [serialLocked, setSerialLocked] = useState(!editable && !!draft.frameNumber)
   return <div className="flow-body"><h2>Record the bicycle</h2><p>{editable ? 'Update the bicycle details for this transaction.' : 'Capture the bicycle details before recording the parties.'}</p>{serialLocked ? <div className="capture-summary"><span>Frame serial<strong>{draft.frameNumber}</strong></span><span className="not-found-label">New bicycle record</span></div> : <label>Frame serial number<div className="serial-input"><QrCode size={16} /><input value={draft.frameNumber} onChange={(event) => update('frameNumber', event.target.value)} onBlur={() => { if (!editable && draft.frameNumber.trim()) setSerialLocked(true) }} placeholder="E.G. AB12345678" /></div></label>}<div className="two-fields"><label>Brand<input value={draft.bicycleBrand} onChange={(event) => update('bicycleBrand', event.target.value)} placeholder="e.g. Trek" /></label><label>Model<input value={draft.bicycleModel} onChange={(event) => update('bicycleModel', event.target.value)} placeholder="e.g. Marlin 7" /></label></div><div className="two-fields"><label>Color<input value={draft.bicycleColor} onChange={(event) => update('bicycleColor', event.target.value)} placeholder="e.g. black" /></label><label>Photo reference<input placeholder="Optional photo ID" /></label></div><label>Distinguishing features<textarea value={draft.distinguishingFeatures} onChange={(event) => update('distinguishingFeatures', event.target.value)} placeholder="Scratches, markings, accessories" /></label></div> }
-function PartyStep({ draft, update, submitted }: { draft: TransactionDraft; update: <K extends keyof TransactionDraft>(key: K, value: TransactionDraft[K]) => void; submitted?: boolean }) { return <div className="flow-body"><h2>Record both parties</h2><p>National ID is the primary identifier. Capture contact and local area details for each participant.</p><PartyFields label="Seller (outbound)" prefix="seller" draft={draft} update={update} submitted={submitted} /><PartyFields label="Buyer (inbound)" prefix="buyer" draft={draft} update={update} submitted={submitted} /><label>Reason for transfer or mismatch<textarea value={draft.reason} onChange={(event) => update('reason', event.target.value)} placeholder="Required when seller differs from current owner" /></label><label>Location<input value={draft.location} onChange={(event) => update('location', event.target.value)} placeholder="e.g. Kigali, Nyarugenge" /></label><div className="price-fields"><label>Bicycle price<input type="number" min="0" value={draft.bicyclePrice} onChange={(event) => update('bicyclePrice', event.target.value)} placeholder="0.00" /></label><label>Service fee<input type="number" min="0" value={draft.serviceFee} onChange={(event) => update('serviceFee', event.target.value)} /></label></div></div> }
+function PartyStep({ draft, update, submitted }: { draft: TransactionDraft; update: <K extends keyof TransactionDraft>(key: K, value: TransactionDraft[K]) => void; submitted?: boolean }) { return <div className="flow-body"><h2>Record both parties</h2><p>National ID is the primary identifier. Capture contact and local area details for each participant.</p><PartyFields label="Seller (outbound)" prefix="seller" draft={draft} update={update} submitted={submitted} /><PartyFields label="Buyer (inbound)" prefix="buyer" draft={draft} update={update} submitted={submitted} /><label><span>Reason for transfer or mismatch (required when seller changes) <b className="required-mark">*</b></span><textarea value={draft.reason} onChange={(event) => update('reason', event.target.value)} placeholder="Required when seller differs from current owner" />{submitted && !draft.reason.trim() && <small className="field-error">Please provide a reason for the seller change before continuing.</small>}</label><label><span>Location <em className="optional-mark">(optional)</em></span><input value={draft.location} onChange={(event) => update('location', event.target.value)} placeholder="e.g. Kigali, Nyarugenge" /></label><div className="price-fields"><label><span>Bicycle price <em className="optional-mark">(optional)</em></span><input type="number" min="0" value={draft.bicyclePrice} onChange={(event) => update('bicyclePrice', event.target.value)} placeholder="0.00" /></label><label><span>Service fee <em className="optional-mark">(optional)</em></span><input type="number" min="0" value={draft.serviceFee} onChange={(event) => update('serviceFee', event.target.value)} /></label></div></div> }
 function PartyFields({ label, prefix, draft, update, submitted }: { label: string; prefix: 'seller' | 'buyer'; draft: TransactionDraft; update: <K extends keyof TransactionDraft>(key: K, value: TransactionDraft[K]) => void; submitted?: boolean }) {
   const [lookupState, setLookupState] = useState<'idle' | 'checking' | 'found' | 'missing'>('idle')
   const lookup = async () => {
@@ -955,7 +955,7 @@ function RegisterScreen({ saved, onSave, onCancel, onViewOwner, editContext }: {
         await queryClient.invalidateQueries({ queryKey: ['registrations'] })
         await queryClient.invalidateQueries({ queryKey: ['bicycle', draft.bicycleId] })
         await queryClient.invalidateQueries({ queryKey: ['bicycles'] })
-      } catch { setSaveError('Could not save registration changes. Check your connection and permissions.'); setIsSaving(false); return }
+      } catch (error) { setSaveError(userFacingError(error, 'Could not save registration changes.')); setIsSaving(false); return }
       setIsSaving(false); onSave(); return
     }
     const clientOperationId = crypto.randomUUID()
