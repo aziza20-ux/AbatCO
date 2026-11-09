@@ -2,6 +2,58 @@ const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:4000/api'
 
 type ApiEnvelope<T> = { data: T }
 
+export function generateSerialNumber(): string {
+  const randomValues = new Uint32Array(1)
+  crypto.getRandomValues(randomValues)
+  const digits = String(randomValues[0] % 100000).padStart(5, '0')
+  const letter = String.fromCharCode(65 + (randomValues[0] % 26))
+  return `SMN-${digits}-${letter}`
+}
+
+export class ApiError extends Error {
+  constructor(public readonly status: number, message: string, public readonly retryAfterSeconds?: number, public readonly code?: string) {
+    super(message)
+    this.name = 'ApiError'
+  }
+}
+
+export function formatRetryDuration(seconds: number): string {
+  const total = Math.max(0, Math.ceil(seconds))
+  if (total < 60) return `${total} second${total === 1 ? '' : 's'}`
+  const minutes = Math.floor(total / 60)
+  const remaining = total % 60
+  if (!remaining) return `${minutes} minute${minutes === 1 ? '' : 's'}`
+  return `${minutes} minute${minutes === 1 ? '' : 's'} and ${remaining} second${remaining === 1 ? '' : 's'}`
+}
+
+function retryAfterSeconds(response: Response, body: unknown): number | undefined {
+  const header = response.headers.get('Retry-After')
+  const bodyRecord = body && typeof body === 'object' ? body as Record<string, unknown> : null
+  const errorRecord = bodyRecord?.error && typeof bodyRecord.error === 'object' ? bodyRecord.error as Record<string, unknown> : null
+  const bodyValue = bodyRecord?.retryAfter ?? bodyRecord?.retryAfterSeconds ?? errorRecord?.retryAfter ?? errorRecord?.retryAfterSeconds
+  const value = header ?? (typeof bodyValue === 'number' || typeof bodyValue === 'string' ? bodyValue : undefined)
+  if (value === undefined) return undefined
+  const seconds = typeof value === 'number' ? value : /^\d+$/.test(value) ? Number(value) : Math.ceil((Date.parse(value) - Date.now()) / 1000)
+  return Number.isFinite(seconds) ? Math.max(0, seconds) : undefined
+}
+
+export function userFacingError(error: unknown, fallback = 'Something went wrong. Please try again.') {
+  if (error instanceof ApiError) {
+    if (error.status === 429) {
+      const seconds = error.retryAfterSeconds ?? Number(error.message.match(/(\d+)\s*seconds?/i)?.[1])
+      return Number.isFinite(seconds) ? `Too many requests. Please try again in ${formatRetryDuration(seconds!)}.` : 'Too many requests. Please try again later.'
+    }
+    if (error.status === 401) return 'Your session has expired. Please sign in again.'
+    if (error.status === 403) return 'You are not authorized to perform this action.'
+    if (error.status === 404) return 'The requested record was not found.'
+    if (error.status === 409) return error.message || 'This operation conflicts with a newer change.'
+    if (error.status >= 500) return 'The server is temporarily unavailable. Please try again later.'
+    return error.message || fallback
+  }
+  if (error instanceof TypeError || (error && typeof error === 'object' && 'isNetworkError' in error)) return 'Network unavailable. Your changes remain local and will sync when connection returns.'
+  return fallback
+}
+
 let refreshPromise: Promise<void> | null = null
 
 async function silentRefresh(): Promise<void> {
@@ -10,7 +62,7 @@ async function silentRefresh(): Promise<void> {
   let result: Response
   try {
     result = await fetch(`${API_URL}/auth/refresh`, { method: 'POST', credentials: 'include', signal: controller.signal })
-  } catch (err) {
+  } catch {
     // Network failure or timeout — do NOT clear the token
     throw Object.assign(new Error('Network error during refresh'), { isNetworkError: true })
   } finally {
@@ -34,9 +86,14 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}, ret
     await refreshPromise
     return apiRequest<T>(path, options, false)
   }
-  if (!response.ok) throw new Error((await response.json().catch(() => null))?.error?.message ?? (await response.json().catch(() => null))?.error ?? 'Request failed')
   if (response.status === 204) return undefined as T
-  return response.json() as Promise<T>
+  const body = await response.json().catch(() => null) as { error?: { code?: string; message?: string } | string } | null
+  if (!response.ok) {
+    const errorValue = body?.error
+    const message = typeof errorValue === 'string' ? errorValue : errorValue?.message
+    throw new ApiError(response.status, message ?? 'Request failed', retryAfterSeconds(response, body), typeof errorValue === 'object' ? errorValue?.code : undefined)
+  }
+  return body as T
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -120,14 +177,14 @@ export async function upsertBicycleByFrameNumber(data: { frameNumber: string; br
   return (await createBicycle(data)).data
 }
 
-export async function updateBicycle(id: string, data: { brand?: string; model?: string; color?: string; distinguishingFeatures?: string; status?: string; currentOwnerId?: string }) {
+export async function updateBicycle(id: string, data: { frameNumber?: string; brand?: string; model?: string; color?: string; distinguishingFeatures?: string; status?: string; currentOwnerId?: string }) {
   return apiRequest<ApiEnvelope<Bicycle>>(`/bicycles/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
 }
 
 // ── Transactions ──────────────────────────────────────────────────────────────
 
 export type PersonSummary = { id: string; name: string; nationalId?: string; phone?: string; cell?: string; sector?: string; village?: string; nationalIdPhotoUrl?: string }
-export type Transaction = { id: string; transactionId: string; type: 'SALE' | 'TRANSFER'; price?: number; serviceFee?: number; reason?: string; location?: string; transactionDate: string; flagStatus: string; flagReason?: string; agentNote?: string; adminReviewNotes?: string; ownershipStatus: 'ACTIVE' | 'HISTORICAL'; bicycle: { id: string; frameNumber: string; brand?: string; model?: string }; seller?: PersonSummary; buyer?: PersonSummary; recordingAgent: { id: string; name: string } }
+export type Transaction = { id: string; transactionId: string; type: 'SALE' | 'TRANSFER'; price?: number; serviceFee?: number; reason?: string; location?: string; transactionDate: string; flagStatus: string; flagReason?: string; agentNote?: string; adminReviewNotes?: string; ownershipStatus: 'ACTIVE' | 'HISTORICAL'; bicycle: { id: string; frameNumber: string; brand?: string; model?: string; color?: string; distinguishingFeatures?: string }; seller?: PersonSummary; buyer?: PersonSummary; recordingAgent: { id: string; name: string } }
 
 export async function listTransactions(params?: { q?: string; flagStatus?: string; type?: string; agentId?: string; personId?: string; page?: number }) {
   const search = new URLSearchParams({ page: String(params?.page ?? 1), limit: '5', ...(params?.q ? { q: params.q } : {}), ...(params?.flagStatus ? { flagStatus: params.flagStatus } : {}), ...(params?.type ? { type: params.type } : {}), ...(params?.agentId ? { agentId: params.agentId } : {}), ...(params?.personId ? { personId: params.personId } : {}) })
@@ -142,9 +199,15 @@ export async function createTransaction(data: object, clientOperationId: string)
   return apiRequest<ApiEnvelope<Transaction>>('/transactions', { method: 'POST', body: JSON.stringify(data), headers: { 'x-client-operation-id': clientOperationId } })
 }
 
-export async function editTransaction(id: string, data: object) {
+export async function editTransaction(id: string, data: { price?: number; serviceFee?: number; reason?: string | null; location?: string | null; bicycle: { id: string; frameNumber: string; brand?: string | null; model?: string | null; color?: string | null; distinguishingFeatures?: string | null }; seller: PersonEdit | null; buyer: PersonEdit | null }) {
   return apiRequest<ApiEnvelope<Transaction>>(`/transactions/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
 }
+
+export async function deleteTransaction(id: string) {
+  return apiRequest<void>(`/transactions/${id}`, { method: 'DELETE' })
+}
+
+type PersonEdit = { id: string; name: string; nationalId: string; phone?: string | null; cell?: string | null; sector?: string | null; village?: string | null; nationalIdPhotoUrl?: string | null }
 
 export async function flagTransaction(id: string, flagReason?: string) {
   return apiRequest<ApiEnvelope<Transaction>>(`/transactions/${id}/flag`, { method: 'PATCH', body: JSON.stringify({ flagReason }) })
@@ -163,12 +226,20 @@ export async function listRegistrations(params?: { bicycleId?: string; ownerId?:
   return apiRequest<ApiEnvelope<Registration[]>>(`/registrations?${search}`)
 }
 
+export async function getRegistration(id: string) {
+  return apiRequest<ApiEnvelope<Registration>>(`/registrations/${id}`)
+}
+
 export async function createRegistration(data: { bicycleId: string; ownerId: string; clientOperationId: string }) {
   return apiRequest<ApiEnvelope<{ id: string }>>('/registrations', { method: 'POST', body: JSON.stringify(data) })
 }
 
 export async function updateRegistration(id: string, data: { bicycleId?: string; ownerId?: string }) {
   return apiRequest<ApiEnvelope<Registration>>(`/registrations/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
+}
+
+export async function deleteRegistration(id: string) {
+  return apiRequest<void>(`/registrations/${id}`, { method: 'DELETE' })
 }
 
 // ── Admin ─────────────────────────────────────────────────────────────────────

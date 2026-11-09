@@ -124,6 +124,11 @@ label { display: grid; gap: 7px; margin: 0 0 15px; color: #8f9895; font-size: 9p
   .secondary-button { min-height: 48px; font-size: 12px; }
   .quiet-button    { font-size: 12px; padding: 8px 4px; }
 
+.required-mark { color: #e05; font-weight: 700; }
+.optional-mark { color: #7f8d87; font-size: 0.9em; font-style: normal; }
+.field-error { display: block; color: #e05; font-size: 11px; margin-top: 4px; }
+.error-text { color: #e05 !important; }
+
   /* --- Flow actions ------------------------------------------------------- */
   .flow-actions { margin-top: 10px; gap: 12px; }
 

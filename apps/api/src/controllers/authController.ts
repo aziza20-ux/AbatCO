@@ -8,7 +8,28 @@ import type { AuthRequest } from '../middleware/auth.js'
 import { sendOtpEmail } from '../mailer.js'
 
 const credentials = z.object({ email: z.string().email().max(254), password: z.string().min(1).max(200) })
-export const loginLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false })
+function sendRateLimitResponse(response: Response, retryAfterSeconds?: number, code = 'RATE_LIMITED', message = 'Too many requests') {
+  if (retryAfterSeconds !== undefined) response.setHeader('Retry-After', String(retryAfterSeconds))
+  return response.status(429).json({
+    error: {
+      code,
+      message,
+      ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
+    },
+  })
+}
+export const rateLimitHandler = (request: Request, response: Response) => {
+  const resetTime = (request as Request & { rateLimit?: { resetTime?: Date } }).rateLimit?.resetTime
+  const retryAfterSeconds = resetTime ? Math.max(0, Math.ceil((resetTime.getTime() - Date.now()) / 1000)) : undefined
+  return sendRateLimitResponse(response, retryAfterSeconds)
+}
+export const loginLimit = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 10,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  handler: rateLimitHandler,
+})
 const cookieMaxAge = 30 * 24 * 60 * 60
 const cookieOptions = `HttpOnly; Path=/api/auth; SameSite=None; Secure; Max-Age=${cookieMaxAge}`
 const refreshValue = (request: Request) => request.header('x-refresh-token') ?? request.header('cookie')?.split(';').map((part) => part.trim()).find((part) => part.startsWith('refresh_token='))?.slice('refresh_token='.length)
@@ -58,8 +79,10 @@ export async function forgotPassword(request: Request, response: Response) {
   const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } })
   // Always return 204 to avoid email enumeration
   if (!user || !user.isActive) return response.status(204).send()
-  if (user.resetOtpSentAt && Date.now() - user.resetOtpSentAt.getTime() < 30_000)
-    return response.status(429).json({ error: { code: 'RESEND_TOO_SOON', message: 'Please wait 30 seconds before requesting a new code' } })
+  if (user.resetOtpSentAt && Date.now() - user.resetOtpSentAt.getTime() < 30_000) {
+    const retryAfterSeconds = Math.max(0, Math.ceil((user.resetOtpSentAt.getTime() + 30_000 - Date.now()) / 1000))
+    return sendRateLimitResponse(response, retryAfterSeconds, 'RESEND_TOO_SOON', 'Please wait before requesting a new code')
+  }
   const otp = String(Math.floor(100000 + Math.random() * 900000))
   const hash = await bcrypt.hash(otp, 10)
   await prisma.user.update({

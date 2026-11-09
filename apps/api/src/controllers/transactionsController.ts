@@ -45,16 +45,96 @@ export async function getTransaction(request: AuthRequest, response: Response) {
 }
 
 // ownershipStatus is intentionally excluded — editing must never change ownership state
-const editInput = z.object({ price: z.number().nonnegative().optional(), serviceFee: z.number().nonnegative().optional(), reason: z.string().trim().max(1000).optional(), location: z.string().trim().max(300).optional(), transactionDate: z.coerce.date().optional(), flagReason: z.string().trim().max(1000).optional(), agentNote: z.string().trim().max(1000).optional() }).strict()
+const editInput = z.object({
+  price: z.number().nonnegative().optional(),
+  serviceFee: z.number().nonnegative().optional(),
+  reason: z.string().trim().max(1000).nullable().optional(),
+  location: z.string().trim().max(300).nullable().optional(),
+  transactionDate: z.coerce.date().optional(),
+  flagReason: z.string().trim().max(1000).optional(),
+  agentNote: z.string().trim().max(1000).optional(),
+  bicycle: z.object({
+    id: z.string().cuid(),
+    frameNumber: z.string().trim().min(1).max(100),
+    brand: z.string().trim().max(100).nullable().optional(),
+    model: z.string().trim().max(100).nullable().optional(),
+    color: z.string().trim().max(80).nullable().optional(),
+    distinguishingFeatures: z.string().trim().max(1000).nullable().optional(),
+  }).optional(),
+  seller: z.object({
+    id: z.string().cuid(),
+    name: z.string().trim().min(1).max(160),
+    nationalId: z.string().trim().min(1).max(80),
+    phone: z.string().trim().max(40).nullable().optional(),
+    cell: z.string().trim().max(80).nullable().optional(),
+    sector: z.string().trim().max(120).nullable().optional(),
+    village: z.string().trim().max(120).nullable().optional(),
+    nationalIdPhotoUrl: z.string().url().max(1000).nullable().optional(),
+  }).nullable().optional(),
+  buyer: z.object({
+    id: z.string().cuid(),
+    name: z.string().trim().min(1).max(160),
+    nationalId: z.string().trim().min(1).max(80),
+    phone: z.string().trim().max(40).nullable().optional(),
+    cell: z.string().trim().max(80).nullable().optional(),
+    sector: z.string().trim().max(120).nullable().optional(),
+    village: z.string().trim().max(120).nullable().optional(),
+    nationalIdPhotoUrl: z.string().url().max(1000).nullable().optional(),
+  }).nullable().optional(),
+}).strict()
 
 export async function editTransaction(request: AuthRequest, response: Response) {
   const inputData = editInput.parse(request.body)
-  const where: Prisma.TransactionWhereInput = { OR: [{ id: String(request.params.id) }, { transactionId: String(request.params.id) }], ...(request.user!.role === 'AGENT' ? { recordingAgentId: request.user!.id } : {}) }
-  const existing = await prisma.transaction.findFirst({ where, select: { id: true } })
+  const where: Prisma.TransactionWhereInput = { OR: [{ id: String(request.params.id) }, { transactionId: String(request.params.id) }] }
+  const existing = await prisma.transaction.findFirst({ where, select: { id: true, bicycleId: true, sellerId: true, buyerId: true, bicycle: { select: { currentOwnerId: true } } } })
   if (!existing) return response.status(404).json({ error: { code: 'NOT_FOUND', message: 'Transaction not found' } })
-  const updated = await prisma.transaction.update({ where: { id: existing.id }, data: inputData })
+  const sellerId = inputData.seller?.id ?? existing.sellerId
+  const sellerChanged = sellerId !== existing.sellerId
+  if (sellerChanged && sellerId && existing.bicycle.currentOwnerId && sellerId !== existing.bicycle.currentOwnerId && !inputData.reason?.trim()) {
+    return response.status(422).json({ error: { code: 'OWNER_MISMATCH_REASON_REQUIRED', message: 'A reason is required when seller differs from current owner' } })
+  }
+  const updated = await prisma.$transaction(async (tx) => {
+    const bicycleInput = inputData.bicycle
+    const partyUpdates = [
+      ['seller', inputData.seller, existing.sellerId],
+      ['buyer', inputData.buyer, existing.buyerId],
+    ] as const
+    for (const [party, personInput, existingPersonId] of partyUpdates) {
+      if (personInput === undefined) continue
+      if (personInput === null) {
+        if (existingPersonId !== null) throw Object.assign(new Error(`Transaction ${party} cannot remove its party`), { status: 400 })
+        continue
+      }
+      if (personInput.id !== existingPersonId) throw Object.assign(new Error(`Transaction ${party} cannot change its party relationship`), { status: 400 })
+      await tx.person.update({ where: { id: personInput.id }, data: { name: personInput.name, nationalId: personInput.nationalId, phone: personInput.phone, cell: personInput.cell, sector: personInput.sector, village: personInput.village, nationalIdPhotoUrl: personInput.nationalIdPhotoUrl } })
+    }
+    if (bicycleInput) {
+      if (bicycleInput.id !== existing.bicycleId) {
+        throw Object.assign(new Error('Transaction bicycle cannot be changed'), { status: 400 })
+      }
+      await tx.bicycle.update({ where: { id: bicycleInput.id }, data: { frameNumber: bicycleInput.frameNumber, brand: bicycleInput.brand, model: bicycleInput.model, color: bicycleInput.color, distinguishingFeatures: bicycleInput.distinguishingFeatures } })
+    }
+    const { bicycle: _bicycle, seller: _seller, buyer: _buyer, ...transactionData } = inputData
+    return tx.transaction.update({ where: { id: existing.id }, data: transactionData, select: { id: true, transactionId: true, type: true, price: true, serviceFee: true, reason: true, location: true, transactionDate: true, flagStatus: true, flagReason: true, agentNote: true, adminReviewNotes: true, ownershipStatus: true, bicycle: { include: { currentOwner: true } }, seller: true, buyer: true, recordingAgent: { select: { id: true, name: true } } } })
+  })
   await audit(request.user!.id, 'TRANSACTION_UPDATED', 'Transaction', updated.id, { transactionId: updated.transactionId, fields: Object.keys(inputData) })
   return response.json({ data: updated })
+}
+
+export async function deleteTransaction(request: AuthRequest, response: Response) {
+  const transaction = await prisma.transaction.findFirst({
+    where: { OR: [{ id: String(request.params.id) }, { transactionId: String(request.params.id) }] },
+    select: { id: true, bicycleId: true, sellerId: true, ownershipStatus: true, transactionId: true },
+  })
+  if (!transaction) return response.status(404).json({ error: { code: 'NOT_FOUND', message: 'Transaction not found' } })
+  await prisma.$transaction(async (tx) => {
+    if (transaction.ownershipStatus === 'ACTIVE') {
+      await tx.bicycle.update({ where: { id: transaction.bicycleId }, data: { currentOwnerId: transaction.sellerId } })
+    }
+    await tx.transaction.delete({ where: { id: transaction.id } })
+  })
+  await audit(request.user!.id, 'TRANSACTION_DELETED', 'Transaction', transaction.id, { transactionId: transaction.transactionId })
+  return response.status(204).send()
 }
 
 export async function createTransaction(request: AuthRequest, response: Response) {
