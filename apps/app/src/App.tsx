@@ -124,6 +124,7 @@ export default function App() {
   }
   const profileOrigin = (): Screen => role === 'ADMIN' ? 'admin-home' : 'home'
   const go = (next: Screen) => { setSaved(false); if (next === 'transaction') { setTransactionStep(0); setEditTransactionDraft(null) } if (next === 'register') setEditRegistrationData(null); if (next !== 'profile') setProfileSection('main'); history.pushState({ screen: next }, ''); setScreen(next) }
+  const replaceScreen = (next: Screen) => { setSaved(false); if (next !== 'profile') setProfileSection('main'); history.replaceState({ screen: next }, ''); setScreen(next) }
 
   if (restoring) return <main className="login-screen"><div className="login-hero"><div className="hero-bike"><img src="/icons/icon-192.png" alt="AbatCO" /></div><strong>CycleTrack</strong></div><section className="login-panel"><p className="screen-kicker">RESUMING SESSION</p><p className="login-copy">Resuming session...</p></section></main>
 
@@ -146,7 +147,7 @@ export default function App() {
       {screen === 'home' && <HomeScreen onNavigate={go} onSelect={openDetails} pendingCount={pendingCount} isOnline={isOnline} setRegisterOrigin={setRegisterOrigin} />}
       {screen === 'admin-home' && <AdminHomeScreen onNavigate={go} onManageProfile={() => go('profile')} onSetRegisterOrigin={setRegisterOrigin} />}
       {screen === 'admin-transactions' && <AdminTransactionsScreen onNavigate={go} onSelectTransaction={(id) => { setSelectedTransactionId(id); setTransactionOrigin('admin-transactions') }} />}
-      {screen === 'transaction-record' && <AdminRecordScreen transactionId={selectedTransactionId} onNavigate={go} role={role} onEditTransaction={(id, draft) => { setEditTransactionDraft({ id, draft }); setTransactionStep(0); history.pushState({ screen: 'transaction' }, ''); setScreen('transaction') }} />}
+      {screen === 'transaction-record' && <AdminRecordScreen transactionId={selectedTransactionId} onNavigate={go} role={role} onEditTransaction={(id, draft) => { setSelectedTransactionId(id); setEditTransactionDraft({ id, draft }); setTransactionStep(0); history.pushState({ screen: 'transaction' }, ''); setScreen('transaction') }} />}
       {screen === 'flagged-queue' && <FlaggedQueueScreen onNavigate={go} onSelectTransaction={(id) => { setSelectedTransactionId(id); setTransactionOrigin('flagged-queue') }} />}
       {screen === 'bicycle-inventory' && <BicycleInventoryScreen onNavigate={go} onSelectBicycle={(bike) => { setSelectedOwnershipBicycle(bike); go('ownership-chain') }} />}
       {screen === 'ownership-chain' && <OwnershipChainScreen bicycle={selectedOwnershipBicycle} />}
@@ -154,10 +155,10 @@ export default function App() {
       {screen === 'agent-onboarding' && <AgentOnboardingScreen onNavigate={(s) => { if (s !== 'agent-onboarding') setSelectedAgent(null); go(s) }} editAgent={selectedAgent} />}
       {screen === 'agent-terminal' && <AgentTerminalScreen agent={selectedAgent} onNavigate={go} />}
       {screen === 'reports-exports' && <ReportsExportsScreen onNavigate={go} />}
-      {screen === 'transaction' && <TransactionFlow step={transactionStep} setStep={setTransactionStep} saved={saved} onSave={() => { setSaved(true); refreshPending() }} onCancel={() => { const wasEdit = !!editTransactionDraft; setEditTransactionDraft(null); go(wasEdit ? 'transaction-record' : role === 'ADMIN' ? 'admin-home' : 'home') }} onViewOwner={setOwnerDetails} editContext={editTransactionDraft} />}
+      {screen === 'transaction' && <TransactionFlow step={transactionStep} setStep={setTransactionStep} saved={saved} onSave={(updated) => { if (updated && editTransactionDraft) { setSelectedTransactionId(updated.id); setSelected((current) => current ? { ...current, id: updated.bicycle.id, frameNumber: updated.bicycle.frameNumber, name: `${updated.bicycle.brand ?? ''} ${updated.bicycle.model ?? ''}`.trim() || updated.bicycle.frameNumber, color: updated.bicycle.color ?? '—' } : current) } setSaved(true); refreshPending() }} onCancel={() => { const wasEdit = !!editTransactionDraft; const destination = wasEdit ? transactionOrigin === 'details' ? 'details' : 'transaction-record' : role === 'ADMIN' ? 'admin-home' : 'home'; setEditTransactionDraft(null); if (wasEdit) replaceScreen(destination); else go(destination) }} onViewOwner={setOwnerDetails} editContext={editTransactionDraft} />}
       {screen === 'register' && <RegisterScreen onSave={() => { setSaved(true); refreshPending() }} saved={saved} onCancel={() => { const wasEdit = !!editRegistrationData; setEditRegistrationData(null); go(wasEdit ? 'details' : registerOrigin) }} onViewOwner={setOwnerDetails} editContext={editRegistrationData} />}
       {screen === 'search' && <SearchScreen query={query} setQuery={setQuery} onSelect={openDetails} />}
-      {screen === 'details' && selected && <DetailsScreen record={selected} role={role} onEditRegistration={(id, draft) => { setEditRegistrationData({ id, draft }); setRegisterOrigin(detailsOrigin as RegisterOrigin); history.pushState({ screen: 'register' }, ''); setScreen('register') }} onEditTransaction={(id, draft) => { setEditTransactionDraft({ id, draft }); setTransactionOrigin('details'); setTransactionStep(0); history.pushState({ screen: 'transaction' }, ''); setScreen('transaction') }} />}
+      {screen === 'details' && selected && <DetailsScreen record={selected} role={role} onEditRegistration={(id, draft) => { setEditRegistrationData({ id, draft }); setRegisterOrigin(detailsOrigin as RegisterOrigin); history.pushState({ screen: 'register' }, ''); setScreen('register') }} onEditTransaction={(id, draft) => { setSelectedTransactionId(id); setEditTransactionDraft({ id, draft }); setTransactionOrigin('details'); setTransactionStep(0); history.pushState({ screen: 'transaction' }, ''); setScreen('transaction') }} />}
       {screen === 'activity' && <ActivityScreen onOpenDetails={openDetailsById} onSelectTransaction={(id) => { setSelectedTransactionId(id); setTransactionOrigin('activity'); go('transaction-record') }} />}
       {screen === 'people' && <PeopleScreen onSelectPerson={(p) => { setSelectedPerson(p); go('person-activity') }} />}
       {screen === 'person-activity' && <PersonActivityScreen person={selectedPerson} onSelectTransaction={(id) => { setSelectedTransactionId(id); setTransactionOrigin('person-activity'); go('transaction-record') }} onOpenDetails={openDetailsById} />}
@@ -691,7 +692,7 @@ type TransactionDraft = { type: 'SALE' | 'TRANSFER'; bicycleId: string; frameNum
 
 const makeEmptyTransaction = (): TransactionDraft => ({ type: (localStorage.getItem('defaultTxType') as 'SALE' | 'TRANSFER') ?? 'SALE', bicycleId: '', frameNumber: '', bicycleBrand: '', bicycleModel: '', bicycleColor: '', distinguishingFeatures: '', sellerId: '', sellerName: '', sellerNationalId: '', sellerPhone: '', sellerCell: '', sellerSector: '', sellerVillage: '', sellerNationalIdPhotoUrl: '', buyerId: '', buyerName: '', buyerNationalId: '', buyerPhone: '', buyerCell: '', buyerSector: '', buyerVillage: '', buyerNationalIdPhotoUrl: '', bicyclePrice: '', serviceFee: '5.00', reason: '', location: '' })
 
-function TransactionFlow({ step, setStep, saved, onSave, onCancel, onViewOwner, editContext }: { step: number; setStep: (step: number) => void; saved: boolean; onSave: () => void; onCancel: () => void; onViewOwner: (person: PersonRecord) => void; editContext: { id: string; draft: TransactionDraft } | null }) {
+function TransactionFlow({ step, setStep, saved, onSave, onCancel, onViewOwner, editContext }: { step: number; setStep: (step: number) => void; saved: boolean; onSave: (updated?: api.Transaction) => void; onCancel: () => void; onViewOwner: (person: PersonRecord) => void; editContext: { id: string; draft: TransactionDraft } | null }) {
   const queryClient = useQueryClient()
   const isEdit = !!editContext
   const [draft, setDraft] = useState<TransactionDraft>(() => editContext?.draft ?? makeEmptyTransaction())
@@ -760,6 +761,7 @@ function TransactionFlow({ step, setStep, saved, onSave, onCancel, onViewOwner, 
     setIsSaving(true)
     setSaveError(null)
     if (isEdit) {
+      let updated: api.Transaction | undefined
       try {
         const result = await api.editTransaction(editContext!.id, {
           ...(draft.bicyclePrice !== '' ? { price: Number(draft.bicyclePrice) } : {}),
@@ -795,6 +797,7 @@ function TransactionFlow({ step, setStep, saved, onSave, onCancel, onViewOwner, 
             nationalIdPhotoUrl: draft.buyerNationalIdPhotoUrl.trim() || null,
           } : null,
         })
+        updated = result.data
         queryClient.setQueryData(['transaction', editContext!.id], result)
         if (result.data.bicycle) queryClient.setQueryData(['bicycle', result.data.bicycle.id], { data: result.data.bicycle })
         await queryClient.invalidateQueries({ queryKey: ['transaction', editContext!.id] })
@@ -802,7 +805,7 @@ function TransactionFlow({ step, setStep, saved, onSave, onCancel, onViewOwner, 
         await queryClient.invalidateQueries({ queryKey: ['bicycle', draft.bicycleId] })
         await queryClient.invalidateQueries({ queryKey: ['bicycles'] })
       } catch (error) { setSaveError(userFacingError(error, 'Could not save transaction changes.')); setIsSaving(false); return }
-      setIsSaving(false); onSave(); return
+      setIsSaving(false); onSave(updated); return
     }
     const clientOperationId = crypto.randomUUID()
     try {

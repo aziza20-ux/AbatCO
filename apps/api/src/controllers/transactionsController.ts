@@ -89,7 +89,8 @@ export async function editTransaction(request: AuthRequest, response: Response) 
   const existing = await prisma.transaction.findFirst({ where, select: { id: true, bicycleId: true, sellerId: true, buyerId: true, bicycle: { select: { currentOwnerId: true } } } })
   if (!existing) return response.status(404).json({ error: { code: 'NOT_FOUND', message: 'Transaction not found' } })
   const sellerId = inputData.seller?.id ?? existing.sellerId
-  if (sellerId && existing.bicycle.currentOwnerId && sellerId !== existing.bicycle.currentOwnerId && !inputData.reason?.trim()) {
+  const sellerChanged = sellerId !== existing.sellerId
+  if (sellerChanged && sellerId && existing.bicycle.currentOwnerId && sellerId !== existing.bicycle.currentOwnerId && !inputData.reason?.trim()) {
     return response.status(422).json({ error: { code: 'OWNER_MISMATCH_REASON_REQUIRED', message: 'A reason is required when seller differs from current owner' } })
   }
   const updated = await prisma.$transaction(async (tx) => {
